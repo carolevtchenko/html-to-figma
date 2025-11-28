@@ -1,0 +1,12 @@
+{
+  "name": "HTML Page → Figma Auto Layout (API)",
+  "id": "html-page-to-figma-autolayout-api-carol",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["https://SEU_DOMINIO.vercel.app"],
+    "reasoning": "Send HTML to Carol's backend that uses Gemini to convert it into Figma layout specs."
+  }
+}
