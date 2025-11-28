@@ -22,7 +22,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: "gemini-3.0-pro" })
+    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" })
 
     const prompt = `
 You are a layout conversion engine for Figma.
