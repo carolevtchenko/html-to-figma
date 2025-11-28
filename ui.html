@@ -1,170 +1,154 @@
-<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
-<html>
-<head>
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <meta http-equiv="Content-Style-Type" content="text/css">
-  <title></title>
-  <meta name="Generator" content="Cocoa HTML Writer">
-  <meta name="CocoaVersion" content="2575.6">
-  <style type="text/css">
-    p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica}
-    p.p2 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica; min-height: 14.0px}
-  </style>
-</head>
-<body>
-<p class="p1">&lt;!DOCTYPE html&gt;</p>
-<p class="p1">&lt;html lang="pt-BR"&gt;</p>
-<p class="p1"><span class="Apple-converted-space">  </span>&lt;head&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;meta charset="utf-8" /&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;title&gt;HTML → Figma (API)&lt;/title&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;style&gt;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>body {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",</p>
-<p class="p1"><span class="Apple-converted-space">          </span>sans-serif;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>margin: 16px;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>label {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-size: 12px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-weight: 600;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>display: block;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>margin-bottom: 4px;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>input[type="text"] {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>width: 100%;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>box-sizing: border-box;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>padding: 6px 8px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>margin-bottom: 8px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>border-radius: 6px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>border: 1px solid #ccc;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-size: 12px;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>textarea {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>width: 100%;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>height: 220px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>box-sizing: border-box;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>margin-bottom: 8px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>border-radius: 6px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>border: 1px solid #ccc;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-size: 11px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas,</p>
-<p class="p1"><span class="Apple-converted-space">          </span>"Liberation Mono", "Courier New", monospace;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>padding: 8px;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>.row {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>display: flex;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>gap: 8px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>margin-bottom: 8px;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>button {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>padding: 8px 12px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>border-radius: 6px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>border: none;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>cursor: pointer;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-size: 12px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-weight: 500;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>#fetch-url {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>background: #f3f3f3;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>#convert {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>background: #18a0fb;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>color: white;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>#status {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>font-size: 11px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>margin-top: 4px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>min-height: 14px;</p>
-<p class="p1"><span class="Apple-converted-space">        </span>color: #555;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;/style&gt;</p>
-<p class="p1"><span class="Apple-converted-space">  </span>&lt;/head&gt;</p>
-<p class="p1"><span class="Apple-converted-space">  </span>&lt;body&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;h3 style="margin-top: 0"&gt;HTML Page → Figma Auto Layout (API)&lt;/h3&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;p style="font-size: 11px; color: #555; margin-top: 0"&gt;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>1) Digite uma URL e clique em &lt;strong&gt;Carregar URL&lt;/strong&gt; ou cole o</p>
-<p class="p1"><span class="Apple-converted-space">      </span>HTML manualmente.&lt;br /&gt;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>2) Clique em &lt;strong&gt;Enviar para o Figma&lt;/strong&gt;. O plugin manda o HTML</p>
-<p class="p1"><span class="Apple-converted-space">      </span>para uma API externa que devolve o layout.</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;/p&gt;</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;label for="url-input"&gt;URL da página&lt;/label&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;div class="row"&gt;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>&lt;input</p>
-<p class="p1"><span class="Apple-converted-space">        </span>id="url-input"</p>
-<p class="p1"><span class="Apple-converted-space">        </span>type="text"</p>
-<p class="p1"><span class="Apple-converted-space">        </span>placeholder="https://meusite.com"</p>
-<p class="p1"><span class="Apple-converted-space">        </span>spellcheck="false"</p>
-<p class="p1"><span class="Apple-converted-space">      </span>/&gt;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>&lt;button id="fetch-url"&gt;Carregar URL&lt;/button&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;/div&gt;</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;label for="html-input"&gt;HTML da página (editável)&lt;/label&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;textarea</p>
-<p class="p1"><span class="Apple-converted-space">      </span>id="html-input"</p>
-<p class="p1"><span class="Apple-converted-space">      </span>placeholder="Cole aqui o HTML da página (ou carregue a partir da URL)..."</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&gt;&lt;/textarea&gt;</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;button id="convert"&gt;Enviar para o Figma&lt;/button&gt;</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;div id="status"&gt;&lt;/div&gt;</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;script&gt;</p>
-<p class="p1"><span class="Apple-converted-space">      </span>const urlInput = document.getElementById("url-input")</p>
-<p class="p1"><span class="Apple-converted-space">      </span>const htmlInput = document.getElementById("html-input")</p>
-<p class="p1"><span class="Apple-converted-space">      </span>const statusEl = document.getElementById("status")</p>
-<p class="p1"><span class="Apple-converted-space">      </span>const fetchBtn = document.getElementById("fetch-url")</p>
-<p class="p1"><span class="Apple-converted-space">      </span>const convertBtn = document.getElementById("convert")</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">      </span>function setStatus(msg, isError = false) {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>statusEl.textContent = msg || ""</p>
-<p class="p1"><span class="Apple-converted-space">        </span>statusEl.style.color = isError ? "#c00" : "#555"</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">      </span>// Carrega HTML direto da URL (no contexto da UI)</p>
-<p class="p1"><span class="Apple-converted-space">      </span>fetchBtn.onclick = async () =&gt; {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>const url = (urlInput.value || "").trim()</p>
-<p class="p1"><span class="Apple-converted-space">        </span>if (!url) {</p>
-<p class="p1"><span class="Apple-converted-space">          </span>setStatus("Informe uma URL para carregar.", true)</p>
-<p class="p1"><span class="Apple-converted-space">          </span>return</p>
-<p class="p1"><span class="Apple-converted-space">        </span>}</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">        </span>try {</p>
-<p class="p1"><span class="Apple-converted-space">          </span>setStatus("Carregando HTML da URL...")</p>
-<p class="p1"><span class="Apple-converted-space">          </span>const res = await fetch(url)</p>
-<p class="p1"><span class="Apple-converted-space">          </span>if (!res.ok) throw new Error("Status HTTP: " + res.status)</p>
-<p class="p1"><span class="Apple-converted-space">          </span>const html = await res.text()</p>
-<p class="p1"><span class="Apple-converted-space">          </span>htmlInput.value = html</p>
-<p class="p1"><span class="Apple-converted-space">          </span>setStatus("HTML carregado. Revise/ajuste se quiser e envie para o Figma.")</p>
-<p class="p1"><span class="Apple-converted-space">        </span>} catch (err) {</p>
-<p class="p1"><span class="Apple-converted-space">          </span>console.error(err)</p>
-<p class="p1"><span class="Apple-converted-space">          </span>setStatus("Erro ao carregar a URL (CORS/bloqueio é comum).", true)</p>
-<p class="p1"><span class="Apple-converted-space">        </span>}</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">      </span>// Envia HTML bruto + URL para o code.js</p>
-<p class="p1"><span class="Apple-converted-space">      </span>convertBtn.onclick = () =&gt; {</p>
-<p class="p1"><span class="Apple-converted-space">        </span>const html = (htmlInput.value || "").trim()</p>
-<p class="p1"><span class="Apple-converted-space">        </span>const url = (urlInput.value || "").trim()</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">        </span>if (!html) {</p>
-<p class="p1"><span class="Apple-converted-space">          </span>setStatus("Cole ou carregue o HTML antes de enviar.", true)</p>
-<p class="p1"><span class="Apple-converted-space">          </span>return</p>
-<p class="p1"><span class="Apple-converted-space">        </span>}</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">        </span>parent.postMessage(</p>
-<p class="p1"><span class="Apple-converted-space">          </span>{</p>
-<p class="p1"><span class="Apple-converted-space">            </span>pluginMessage: {</p>
-<p class="p1"><span class="Apple-converted-space">              </span>type: "convert-via-api",</p>
-<p class="p1"><span class="Apple-converted-space">              </span>html,</p>
-<p class="p1"><span class="Apple-converted-space">              </span>url,</p>
-<p class="p1"><span class="Apple-converted-space">            </span>},</p>
-<p class="p1"><span class="Apple-converted-space">          </span>},</p>
-<p class="p1"><span class="Apple-converted-space">          </span>"*"</p>
-<p class="p1"><span class="Apple-converted-space">        </span>)</p>
-<p class="p2"><br></p>
-<p class="p1"><span class="Apple-converted-space">        </span>setStatus("HTML enviado para o plugin. Aguarde o layout aparecer no canvas.")</p>
-<p class="p1"><span class="Apple-converted-space">      </span>}</p>
-<p class="p1"><span class="Apple-converted-space">    </span>&lt;/script&gt;</p>
-<p class="p1"><span class="Apple-converted-space">  </span>&lt;/body&gt;</p>
-<p class="p1">&lt;/html&gt;</p>
-</body>
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>HTML → Figma (API)</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        margin: 16px;
+      }
+      label {
+        font-size: 12px;
+        font-weight: 600;
+        display: block;
+        margin-bottom: 4px;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        margin-bottom: 8px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+        font-size: 12px;
+      }
+      textarea {
+        width: 100%;
+        height: 220px;
+        box-sizing: border-box;
+        margin-bottom: 8px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+        font-size: 11px;
+        font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        padding: 8px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+      }
+      #fetch-url {
+        background: #f3f3f3;
+      }
+      #convert {
+        background: #18a0fb;
+        color: white;
+      }
+      #status {
+        font-size: 11px;
+        margin-top: 4px;
+        min-height: 14px;
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <h3 style="margin-top: 0">HTML Page → Figma Auto Layout (API)</h3>
+    <p style="font-size: 11px; color: #555; margin-top: 0">
+      1) Digite uma URL e clique em <strong>Carregar URL</strong> ou cole o
+      HTML manualmente.<br />
+      2) Clique em <strong>Enviar para o Figma</strong>. O plugin manda o HTML
+      para uma API externa que devolve o layout.
+    </p>
+
+    <label for="url-input">URL da página</label>
+    <div class="row">
+      <input
+        id="url-input"
+        type="text"
+        placeholder="https://meusite.com"
+        spellcheck="false"
+      />
+      <button id="fetch-url">Carregar URL</button>
+    </div>
+
+    <label for="html-input">HTML da página (editável)</label>
+    <textarea
+      id="html-input"
+      placeholder="Cole aqui o HTML da página (ou carregue a partir da URL)..."
+    ></textarea>
+
+    <button id="convert">Enviar para o Figma</button>
+    <div id="status"></div>
+
+    <script>
+      const urlInput = document.getElementById("url-input")
+      const htmlInput = document.getElementById("html-input")
+      const statusEl = document.getElementById("status")
+      const fetchBtn = document.getElementById("fetch-url")
+      const convertBtn = document.getElementById("convert")
+
+      function setStatus(msg, isError = false) {
+        statusEl.textContent = msg || ""
+        statusEl.style.color = isError ? "#c00" : "#555"
+      }
+
+      // Carrega HTML direto da URL (no contexto da UI)
+      fetchBtn.onclick = async () => {
+        const url = (urlInput.value || "").trim()
+        if (!url) {
+          setStatus("Informe uma URL para carregar.", true)
+          return
+        }
+
+        try {
+          setStatus("Carregando HTML da URL...")
+          const res = await fetch(url)
+          if (!res.ok) throw new Error("Status HTTP: " + res.status)
+          const html = await res.text()
+          htmlInput.value = html
+          setStatus("HTML carregado. Revise/ajuste se quiser e envie para o Figma.")
+        } catch (err) {
+          console.error(err)
+          setStatus("Erro ao carregar a URL (CORS/bloqueio é comum).", true)
+        }
+      }
+
+      // Envia HTML bruto + URL para o code.js
+      convertBtn.onclick = () => {
+        const html = (htmlInput.value || "").trim()
+        const url = (urlInput.value || "").trim()
+
+        if (!html) {
+          setStatus("Cole ou carregue o HTML antes de enviar.", true)
+          return
+        }
+
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "convert-via-api",
+              html,
+              url,
+            },
+          },
+          "*"
+        )
+
+        setStatus("HTML enviado para o plugin. Aguarde o layout aparecer no canvas.")
+      }
+    </script>
+  </body>
 </html>
