@@ -3,7 +3,7 @@
   "id": "html-page-to-figma-autolayout-api-carol",
   "api": "1.0.0",
   "main": "code.js",
-  "ui": "ui",
+  "ui": "ui.html",
   "editorType": ["figma"],
   "networkAccess": {
     "allowedDomains": ["https://html-to-figma-chi.vercel.app"],
