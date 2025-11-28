@@ -152,7 +152,7 @@ figma.ui.onmessage = async (msg) => {
 
       // 🔹 Troque pela URL real do seu projeto na Vercel:
       const response = await fetch(
-        "https://SEU_DOMINIO.vercel.app/api/convert-html",
+        "https://vercel.com/carol-levtchenkos-projects/html-to-figma",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
