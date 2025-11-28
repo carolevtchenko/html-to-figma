@@ -2,6 +2,18 @@ import { GoogleGenerativeAI } from "@google/generative-ai"
 
 // Handler padrão da Vercel
 export default async function handler(req: any, res: any) {
+  // 🔹 CORS SEMPRE
+  res.setHeader("Access-Control-Allow-Origin", "*")
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS")
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type")
+
+  // 🔹 Responde o preflight OPTIONS
+  if (req.method === "OPTIONS") {
+    res.status(200).end()
+    return
+  }
+
+  // 🔹 Só aceita POST para o fluxo normal
   if (req.method !== "POST") {
     res.status(405).json({ error: "Only POST method is allowed." })
     return
@@ -22,7 +34,8 @@ export default async function handler(req: any, res: any) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" })
+    // usa o modelo que já deu certo pra você antes
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
 
     const prompt = `
 You are a layout conversion engine for Figma.
@@ -70,7 +83,7 @@ ${url || "N/A"}
     const response = result.response
     let text = response.text().trim()
 
-    // Remove blocos ```json ... ``` se o modelo insistir em mandar
+    // Remove blocos ```json ... ``` se o modelo insistir
     text = text.replace(/```json/gi, "").replace(/```/g, "").trim()
 
     let spec: any
