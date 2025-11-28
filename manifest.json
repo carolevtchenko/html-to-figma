@@ -6,7 +6,7 @@
   "ui": "ui.html",
   "editorType": ["figma"],
   "networkAccess": {
-    "allowedDomains": ["https://vercel.com/carol-levtchenkos-projects/html-to-figma"],
+    "allowedDomains": ["https://html-to-figma-chi.vercel.app"],
     "reasoning": "Send HTML to Carol's backend that uses Gemini to convert it into Figma layout specs."
   }
 }
