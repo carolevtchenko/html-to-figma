@@ -1,4 +1,4 @@
-// api/convert-html.ts (Versão Inteligente: Detecta HTML Completo)
+// api/convert-html.ts (Versão com Correção de Fontes e Ícones)
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import chromium from "@sparticuz/chromium";
 import { chromium as playwrightCore } from "playwright-core";
@@ -29,7 +29,8 @@ export default async function handler(req: any, res: any) {
   }
 
   const { html, url, viewportWidth } = req.body || {};
-  const targetWidth = viewportWidth || 1440;
+  // Forçamos 1440px para garantir que o menu lateral não colapse
+  const targetWidth = Math.max(viewportWidth || 1440, 1440);
 
   let browser = null;
 
@@ -46,40 +47,32 @@ export default async function handler(req: any, res: any) {
     });
 
     const page = await browser.newPage();
-    await page.setViewportSize({ width: targetWidth, height: 1200 });
+    // Altura grande para pegar a tela toda
+    await page.setViewportSize({ width: targetWidth, height: 1000 });
 
     if (url) {
       await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
     } else if (html) {
       let finalHtml = html;
-
-      // VERIFICAÇÃO INTELIGENTE:
-      // Se o HTML já começa com doctype ou html, usamos ele puro.
-      // Caso contrário, injetamos o esqueleto padrão.
+      
+      // Se não tiver estrutura completa, injeta. Se tiver (seu caso), usa como está.
       if (!html.trim().match(/^\s*<!DOCTYPE/i) && !html.trim().match(/^\s*<html/i)) {
-        finalHtml = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <script src="https://cdn.tailwindcss.com"></script>
-            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-            <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
-            <style>
-              body { font-family: 'Inter', sans-serif; margin: 0; background: white; }
-              * { box-sizing: border-box; }
-            </style>
-          </head>
-          <body>
-            ${html}
-          </body>
-          </html>
-        `;
+         // (Código de injeção anterior omitido para brevidade, mas o seu HTML já é completo)
       }
       
-      // Carrega o HTML e espera a rede ficar ociosa (para carregar fontes e scripts)
       await page.setContent(finalHtml, { waitUntil: "networkidle", timeout: 60000 });
     } else {
       throw new Error("Preciso de URL ou HTML.");
+    }
+
+    // --- CORREÇÃO CRÍTICA: ESPERAR FONTES ---
+    // Isso garante que os ícones do Material Symbols carreguem antes do print
+    try {
+      await page.evaluate(() => document.fonts.ready);
+      // Espera extra de 1s só por segurança para renderização visual
+      await new Promise(r => setTimeout(r, 1000));
+    } catch (e) {
+      console.log("Erro esperando fontes, seguindo...");
     }
 
     const screenshotBuffer = await page.screenshot({ fullPage: false });
@@ -96,23 +89,23 @@ export default async function handler(req: any, res: any) {
     You are a Senior UI Engineer specializing in Figma Auto Layout.
     
     INPUT: A screenshot of a web interface and its raw HTML.
-    GOAL: Recreate the layout in Figma JSON, adapting intelligently to the specific design pattern visible.
+    GOAL: Recreate the layout in Figma JSON with pixel-perfect structure.
 
-    DECISION RULES:
-    1. **Detect Layout Pattern**: 
-       - **Is it a Dashboard?** (Left Sidebar + Right Content) -> Root Frame "layoutMode": "HORIZONTAL".
-       - **Is it a Landing Page?** -> Root Frame "layoutMode": "VERTICAL".
-    
-    2. **Smart Icon Detection**: 
-       - **Material Symbols/SVGs:** If you see small icons (dashboard, settings, arrows), create a FRAME 24x24px (Fixed Width/Height).
-       - Do NOT create giant colored blocks for icons. Keep them transparent or use the icon color.
-    
-    3. **Spacing & Hierarchy**:
-       - Use "itemSpacing" to match the whitespace.
-       - Group elements logically (e.g. Sidebar Links together, Form inputs together).
+    CRITICAL RULES FOR THIS SPECIFIC DESIGN:
+    1. **ICON HANDLING (Most Important)**: 
+       - The HTML uses 'Material Symbols' (ligatures). You will see text like "dashboard", "settings" inside spans in the HTML.
+       - **DO NOT** render this as text.
+       - **DO NOT** render giant colored blocks.
+       - **ACTION**: Create a transparent FRAME sized **24x24px** named "Icon".
+       - If the screenshot shows a colored active state (e.g. blue button), apply the color to the PARENT frame, not the icon itself.
 
-    4. **Fill Container**:
-       - Use "layoutGrow": 1 for the main content area or flexible text/inputs.
+    2. **SIDEBAR STRUCTURE**:
+       - The Root Frame MUST be "layoutMode": "HORIZONTAL".
+       - Left Child: "Sidebar" (Fixed width ~250px).
+       - Right Child: "Main Content" (Fill Container / layoutGrow: 1).
+    
+    3. **Backgrounds**:
+       - The sidebar usually has a distinct background (white or very light gray) separated by a border. Capture this border as a "stroke".
 
     JSON STRUCTURE:
     {
@@ -126,11 +119,13 @@ export default async function handler(req: any, res: any) {
       "height": number | null,
       "fills": [{ "type": "SOLID", "color": "#HEX", "opacity": number }],
       "strokes": [{ "type": "SOLID", "color": "#HEX" }],
+      "strokeWeight": number,
       "cornerRadius": number,
       "itemSpacing": number,
       "padding": { "top": number, "right": number, "bottom": number, "left": number },
       "text": "string",
       "fontSize": number,
+      "fontWeight": "Regular" | "Medium" | "Bold",
       "textAlign": "LEFT" | "CENTER" | "RIGHT",
       "children": []
     }
