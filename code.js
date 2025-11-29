@@ -1,168 +1,157 @@
-// code.ts – Figma plugin main
+// Mostra a UI definida em ui.html
+figma.showUI(__html__, { width: 520, height: 460 })
 
-// Mostra a UI do ui.html
-figma.showUI(__html__, {
-  width: 520,
-  height: 420,
-})
-
-// Tipos da especificação vinda da API
-type TextSpec = {
-  type: "TEXT"
-  name?: string
-  text: string
-  fontSize?: number
-  bold?: boolean
-  color?: string
+// Utilitário: converte "#RRGGBB" para cor do Figma (0–1)
+function hexToFigmaColor(hex) {
+  if (!hex || typeof hex !== "string") {
+    return { r: 1, g: 1, b: 1 }
+  }
+  const clean = hex.replace("#", "")
+  const r = parseInt(clean.slice(0, 2), 16) / 255
+  const g = parseInt(clean.slice(2, 4), 16) / 255
+  const b = parseInt(clean.slice(4, 6), 16) / 255
+  return { r, g, b }
 }
 
-type FrameSpec = {
-  type: "FRAME"
-  name?: string
-  layout?: "VERTICAL" | "HORIZONTAL"
-  spacing?: number
-  padding?: [number, number, number, number]
-  fills?: string[]
-  children?: NodeSpec[]
-}
+// Cria um TextNode a partir do spec vindo da API
+function createTextNodeFromSpec(spec) {
+  const textNode = figma.createText()
 
-type NodeSpec = TextSpec | FrameSpec
+  textNode.name = spec.name || "Text"
+  textNode.characters = spec.text || ""
 
-// Converte "#RRGGBB" em Paint do Figma
-function hexToPaint(hex: string): Paint {
-  if (!hex) {
-    return {
-      type: "SOLID",
-      color: { r: 1, g: 1, b: 1 },
-    }
+  // Fonte padrão: Inter Regular/Bold
+  if (spec.bold) {
+    textNode.fontName = { family: "Inter", style: "Bold" }
+  } else {
+    textNode.fontName = { family: "Inter", style: "Regular" }
   }
 
-  if (hex.startsWith("#")) hex = hex.slice(1)
-  if (hex.length === 3) {
-    hex = hex
-      .split("")
-      .map((c) => c + c)
-      .join("")
+  if (typeof spec.fontSize === "number") {
+    textNode.fontSize = spec.fontSize
   }
 
-  const num = parseInt(hex, 16)
-  const r = ((num >> 16) & 255) / 255
-  const g = ((num >> 8) & 255) / 255
-  const b = (num & 255) / 255
-
-  return {
-    type: "SOLID",
-    color: { r, g, b },
-  }
-}
-
-// Cria node Figma a partir de um spec
-function createNodeFromSpec(spec: NodeSpec): SceneNode {
-  if (spec.type === "TEXT") {
-    const t = figma.createText()
-    t.name = spec.name || "Text"
-    t.fontName = {
-      family: "Inter",
-      style: spec.bold ? "Bold" : "Regular",
-    }
-    if (spec.fontSize) {
-      t.fontSize = spec.fontSize
-    }
-    t.characters = spec.text || ""
-    t.fills = [hexToPaint(spec.color || "#000000")]
-    return t
-  }
-
-  if (spec.type === "FRAME") {
-    const f = figma.createFrame()
-    f.name = spec.name || "Frame"
-
-    // Auto Layout
-    f.layoutMode = spec.layout === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL"
-    f.itemSpacing = spec.spacing ?? 16
-
-    const [pt, pr, pb, pl] = spec.padding ?? [24, 24, 24, 24]
-    f.paddingTop = pt
-    f.paddingRight = pr
-    f.paddingBottom = pb
-    f.paddingLeft = pl
-
-    if (spec.fills && spec.fills.length > 0) {
-      f.fills = spec.fills.map(hexToPaint)
-    } else {
-      f.fills = [hexToPaint("#FFFFFF")]
-    }
-
-    if (Array.isArray(spec.children)) {
-      for (const child of spec.children) {
-        const node = createNodeFromSpec(child)
-        f.appendChild(node)
-      }
-    }
-
-    // tamanho deixa o Auto Layout cuidar – nada de resize(100,100)
-    return f
-  }
-
-  // fallback
-  const fallback = figma.createFrame()
-  fallback.name = "Unsupported"
-  return fallback
-}
-
-// Escuta mensagens da UI
-figma.ui.onmessage = async (msg) => {
-  if (msg.type !== "convert-via-api") return
-
-  const { html, url } = msg
-
-  try {
-    figma.ui.postMessage({
-      type: "status",
-      message: "Chamando API…",
-    })
-
-    const res = await fetch(
-      "https://html-to-figma-chi.vercel.app/api/convert-html",
+  if (spec.color) {
+    textNode.fills = [
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html, url }),
+        type: "SOLID",
+        color: hexToFigmaColor(spec.color),
+      },
+    ]
+  }
+
+  // Deixa o texto ajustar tamanho automaticamente
+  textNode.textAutoResize = "WIDTH_AND_HEIGHT"
+
+  return textNode
+}
+
+// Cria um Frame com Auto Layout a partir do spec
+function createFrameFromSpec(spec) {
+  const frame = figma.createFrame()
+
+  frame.name = spec.name || "Frame from HTML"
+
+  // Auto layout
+  frame.layoutMode = spec.layout === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL"
+  frame.primaryAxisSizingMode = "AUTO"
+  frame.counterAxisSizingMode = "AUTO"
+  frame.itemSpacing = typeof spec.spacing === "number" ? spec.spacing : 16
+
+  if (Array.isArray(spec.padding) && spec.padding.length === 4) {
+    frame.paddingTop = spec.padding[0]
+    frame.paddingRight = spec.padding[1]
+    frame.paddingBottom = spec.padding[2]
+    frame.paddingLeft = spec.padding[3]
+  } else {
+    frame.paddingTop = 24
+    frame.paddingRight = 24
+    frame.paddingBottom = 24
+    frame.paddingLeft = 24
+  }
+
+  if (Array.isArray(spec.fills) && typeof spec.fills[0] === "string") {
+    frame.fills = [
+      {
+        type: "SOLID",
+        color: hexToFigmaColor(spec.fills[0]),
+      },
+    ]
+  } else {
+    frame.fills = []
+  }
+
+  // Filhos
+  if (Array.isArray(spec.children)) {
+    spec.children.forEach((childSpec) => {
+      let child = null
+      if (childSpec.type === "TEXT") {
+        child = createTextNodeFromSpec(childSpec)
+      } else if (childSpec.type === "FRAME") {
+        child = createFrameFromSpec(childSpec)
       }
-    )
+      if (child) {
+        frame.appendChild(child)
+      }
+    })
+  }
 
-    if (!res.ok) {
-      const text = await res.text()
-      console.error("Erro na API:", res.status, text)
-      figma.ui.postMessage({
-        type: "error",
-        message: `API retornou ${res.status}`,
-      })
-      return
+  return frame
+}
+
+// Constrói tudo a partir do spec da API
+async function buildFromSpec(spec) {
+  // Garante fontes carregadas ANTES de mexer em characters/fontName
+  await Promise.all([
+    figma.loadFontAsync({ family: "Inter", style: "Regular" }),
+    figma.loadFontAsync({ family: "Inter", style: "Bold" }),
+  ])
+
+  const rootFrame = createFrameFromSpec(spec)
+  figma.currentPage.appendChild(rootFrame)
+
+  // Centraliza na viewport
+  rootFrame.x = figma.viewport.center.x
+  rootFrame.y = figma.viewport.center.y
+  figma.viewport.scrollAndZoomIntoView([rootFrame])
+}
+
+// Recebe mensagem da UI (html + url) e chama a API na Vercel
+figma.ui.onmessage = async (msg) => {
+  if (msg.type === "convert-via-api") {
+    try {
+      const response = await fetch(
+        "https://html-to-figma-chi.vercel.app/api/convert-html",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            html: msg.html,
+            url: msg.url || null,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        figma.notify("Erro HTTP da API: " + response.status)
+        return
+      }
+
+      const spec = await response.json()
+
+      if (!spec || spec.error) {
+        figma.notify("Erro na resposta da API.")
+        console.error("Spec com erro:", spec)
+        return
+      }
+
+      await buildFromSpec(spec)
+      figma.notify("Layout criado a partir do HTML ✨")
+    } catch (err) {
+      console.error("Erro no plugin:", err)
+      figma.notify("Erro ao chamar a API. Veja o console.")
     }
-
-    const spec: FrameSpec = await res.json()
-    console.log("Spec recebido da API:", spec)
-
-    // 🔹 carrega fontes antes de criar qualquer TEXT
-    await figma.loadFontAsync({ family: "Inter", style: "Regular" })
-    await figma.loadFontAsync({ family: "Inter", style: "Bold" })
-
-    const rootNode = createNodeFromSpec(spec)
-
-    figma.currentPage.appendChild(rootNode)
-    figma.currentPage.selection = [rootNode]
-    figma.viewport.scrollAndZoomIntoView([rootNode])
-
-    figma.ui.postMessage({
-      type: "status",
-      message: "Layout criado no canvas ✅",
-    })
-  } catch (err) {
-    console.error("Erro no plugin:", err)
-    figma.ui.postMessage({
-      type: "error",
-      message: String(err),
-    })
+  } else if (msg.type === "cancel") {
+    figma.closePlugin()
   }
 }
