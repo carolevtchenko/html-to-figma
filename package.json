@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "playwright": "^1.57.0"
+    "@sparticuz/chromium": "^141.0.0",
+    "playwright-core": "^1.57.0"
   },
   "engines": {
     "node": ">=18"

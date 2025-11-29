@@ -1,6 +1,11 @@
 // api/convert-html.ts
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { chromium } from "playwright";
+import chromium from "@sparticuz/chromium";
+import { chromium as playwrightCore } from "playwright-core";
+
+// Configurações para rodar no Vercel (limite de memória e fontes)
+chromium.setHeadlessMode = true;
+chromium.setGraphicsMode = false;
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -9,7 +14,7 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 export default async function handler(req: any, res: any) {
-  // 1. Configura CORS
+  // CORS Setup
   for (const [key, value] of Object.entries(CORS_HEADERS)) {
     res.setHeader(key, value);
   }
@@ -33,34 +38,42 @@ export default async function handler(req: any, res: any) {
   const { html, url, viewportWidth } = req.body || {};
   const targetWidth = typeof viewportWidth === "number" && viewportWidth > 0 ? viewportWidth : 1440;
 
-  if (!html && !url) {
-    res.status(400).json({ error: "Must provide 'html' or 'url'." });
-    return;
-  }
-
   let browser = null;
+
   try {
-    // 2. Inicializa o Gemini
+    // 1. Inicializa o Gemini
     const genAI = new GoogleGenerativeAI(apiKey);
-    // Usamos o modelo Flash que suporta imagens e é rápido
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // 3. Usa o Playwright para renderizar e tirar print
-    // Nota: Em produção (Vercel), pode ser necessário configurar bibliotecas específicas para o Chromium.
-    browser = await chromium.launch({ headless: true });
+    // 2. Configura o Browser (A mágica acontece aqui)
+    // Se estivermos no Vercel, usamos o @sparticuz/chromium. 
+    // Se for local, tentamos achar um executável local ou falhará se não tiver o playwright full instalado.
+    
+    const executablePath = await chromium.executablePath();
+    
+    browser = await playwrightCore.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: executablePath,
+      headless: chromium.headless,
+    });
+
     const page = await browser.newPage();
     await page.setViewportSize({ width: targetWidth, height: 1200 });
 
     if (url) {
-      await page.goto(url, { waitUntil: "networkidle", timeout: 15000 }).catch(e => console.log("Timeout navegando, prosseguindo..."));
-    } else {
+      // Timeout maior para garantir que dê tempo de carregar
+      await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
+    } else if (html) {
       await page.setContent(html, { waitUntil: "networkidle" });
+    } else {
+        throw new Error("No URL or HTML provided");
     }
 
-    // Tira o screenshot (visão computacional para a IA)
+    // Tira Screenshot
     const screenshotBuffer = await page.screenshot({ fullPage: false });
     const base64Image = screenshotBuffer.toString("base64");
-
+    
     const imagePart = {
       inlineData: {
         data: base64Image,
@@ -68,25 +81,16 @@ export default async function handler(req: any, res: any) {
       },
     };
 
-    // 4. Prompt de Alta Fidelidade
+    // 3. Prompt
     const systemPrompt = `
-    You are an expert Figma Developer and UI Designer.
+    You are an expert Figma Developer.
     GOAL: Convert the provided Website Screenshot and HTML into a HIGH-FIDELITY Figma Auto Layout JSON specification.
-    
     TARGET_WIDTH: ${targetWidth}px
 
     STRICT GUIDELINES:
-    1. **Visual Fidelity**: Rely heavily on the IMAGE to get exact colors, background-colors, spacing, and visual hierarchy. Use the HTML only for structure and text content.
-    2. **Styling Details**: You MUST include properties for:
-       - "strokes" (borders): color and width.
-       - "cornerRadius": number (border-radius).
-       - "effects": drop shadows (type: "DROP_SHADOW").
-    3. **Layout**:
-       - Use "FRAME" for containers.
-       - Use "TEXT" for text.
-       - Use "RECTANGLE" for pure visual blocks or placeholders.
-       - Determine "layoutMode" (VERTICAL/HORIZONTAL) accurately.
-       - Calculate "itemSpacing" and "padding" precisely based on the image.
+    1. **Visual Fidelity**: Use the IMAGE to get exact colors, spacing, and hierarchy.
+    2. **Styling**: Include "strokes" (borders), "cornerRadius", and "effects" (shadows).
+    3. **Layout**: Use "FRAME" for containers, "TEXT" for text. Calculate "itemSpacing" and "padding" precisely.
     
     JSON STRUCTURE:
     {
@@ -108,18 +112,15 @@ export default async function handler(req: any, res: any) {
       "fontSize": number,
       "fontWeight": "Regular" | "Medium" | "Bold",
       "textAlign": "LEFT" | "CENTER" | "RIGHT",
-      "children": [ ...recursive... ]
+      "children": []
     }
-
-    Output ONLY valid JSON. No markdown code blocks.
+    Output ONLY valid JSON.
     `;
 
-    // 5. Envia para o Gemini (Imagem + Texto)
+    // 4. Envia para o Gemini
     const result = await model.generateContent([imagePart, systemPrompt]);
     const response = result.response;
     let text = response.text().trim();
-
-    // Limpeza básica de markdown caso o modelo mande
     text = text.replace(/```json/gi, "").replace(/```/g, "").trim();
 
     const spec = JSON.parse(text);
@@ -127,6 +128,7 @@ export default async function handler(req: any, res: any) {
 
   } catch (err: any) {
     console.error("Error in conversion:", err);
+    // Retorna o erro detalhado para o frontend ver o que houve
     res.status(500).json({ error: "Conversion failed", details: err.message });
   } finally {
     if (browser) await browser.close();

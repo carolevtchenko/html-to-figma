@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/convert-html.ts": {
+      "maxDuration": 60
+    }
+  }
+}
