@@ -97,6 +97,7 @@ export default async function handler(req: any, res: any) {
       "type": "FRAME" | "TEXT" | "RECTANGLE",
       "name": "string",
       "layoutMode": "VERTICAL" | "HORIZONTAL" | "NONE",
+      "layoutGrow": 0 | 1,
       "primaryAxisSizingMode": "FIXED" | "AUTO",
       "counterAxisSizingMode": "FIXED" | "AUTO",
       "primaryAxisAlignItems": "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN",

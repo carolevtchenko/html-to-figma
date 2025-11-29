@@ -1,37 +1,4 @@
-// code.js – Versão Corrigida (Compatível com o motor JS do Figma)
-
-figma.showUI(__html__, { width: 400, height: 550 });
-
-// Função auxiliar para mandar status para a UI
-function sendStatus(text, state) {
-  // state pode ser: "loading", "error", "success"
-  if (!state) state = "loading";
-  figma.ui.postMessage({ type: "update-status", text: text, state: state });
-}
-
-// Carrega fontes
-async function ensureFonts() {
-  const fonts = [
-    { family: "Inter", style: "Regular" },
-    { family: "Inter", style: "Medium" },
-    { family: "Inter", style: "Bold" },
-  ];
-  for (const font of fonts) {
-    try { await figma.loadFontAsync(font); } catch (e) {}
-  }
-}
-
-function hexToFigmaColor(hex) {
-  if (!hex) return { r: 1, g: 1, b: 1 };
-  let c = hex.replace("#", "").trim();
-  if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
-  const num = parseInt(c, 16);
-  return {
-    r: ((num >> 16) & 255) / 255,
-    g: ((num >> 8) & 255) / 255,
-    b: (num & 255) / 255,
-  };
-}
+// No arquivo code.js, substitua a função createNodeFromSpec inteira por esta:
 
 function createNodeFromSpec(spec) {
   if (!spec || !spec.type) return null;
@@ -57,7 +24,6 @@ function createNodeFromSpec(spec) {
         return {
           type: "SOLID",
           color: hexToFigmaColor(f.color),
-          // CORREÇÃO: Trocamos '??' por verificação manual
           opacity: (f.opacity !== undefined) ? f.opacity : 1
         };
       });
@@ -84,12 +50,18 @@ function createNodeFromSpec(spec) {
       }
     }
 
+    // --- NOVA FUNCIONALIDADE: FILL CONTAINER ---
+    // Isso impede que o layout fique achatado
+    if (spec.layoutGrow === 1) {
+        node.layoutGrow = 1; 
+    }
+    // ------------------------------------------
+
     if (spec.fills && spec.fills.length) {
       node.fills = spec.fills.map(function(f) {
         return {
           type: "SOLID",
           color: hexToFigmaColor(f.color),
-          // CORREÇÃO: Trocamos '??' por verificação manual
           opacity: (f.opacity !== undefined) ? f.opacity : 1
         };
       });
@@ -97,10 +69,7 @@ function createNodeFromSpec(spec) {
 
     if (spec.strokes && spec.strokes.length) {
       node.strokes = spec.strokes.map(function(s) {
-        return {
-          type: "SOLID",
-          color: hexToFigmaColor(s.color)
-        };
+        return { type: "SOLID", color: hexToFigmaColor(s.color) };
       });
       if (spec.strokeWeight) node.strokeWeight = spec.strokeWeight;
     }
@@ -134,59 +103,3 @@ function createNodeFromSpec(spec) {
   }
   return node;
 }
-
-figma.ui.onmessage = async (msg) => {
-  if (msg.type !== "convert-via-api") return;
-
-  const html = msg.html;
-  const url = msg.url;
-  
-  let viewportWidth = 1440;
-  if (figma.currentPage.selection.length > 0) {
-     const s = figma.currentPage.selection[0];
-     if(s.width) viewportWidth = Math.floor(s.width);
-  }
-
-  try {
-    // 1. Feedback inicial
-    sendStatus("Conectando à IA... (Aguarde ~30s)", "loading");
-
-    const apiUrl = "https://html-to-figma-chi.vercel.app/api/convert-html"; 
-    
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html: html, url: url, viewportWidth: viewportWidth }),
-    });
-
-    if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || "Erro HTTP " + res.status);
-    }
-
-    // 2. Feedback de processamento
-    sendStatus("IA respondeu! Construindo elementos no Figma...", "loading");
-
-    const spec = await res.json();
-    await ensureFonts();
-    const rootNode = createNodeFromSpec(spec);
-
-    if (rootNode) {
-      if(rootNode.type === "FRAME") rootNode.resizeWithoutConstraints(viewportWidth, rootNode.height);
-      figma.currentPage.appendChild(rootNode);
-      figma.currentPage.selection = [rootNode];
-      figma.viewport.scrollAndZoomIntoView([rootNode]);
-      
-      // 3. Sucesso final
-      sendStatus("Pronto! Layout gerado com sucesso.", "success");
-      figma.notify("Layout gerado! 🎉");
-    } else {
-      throw new Error("JSON inválido retornado pela IA.");
-    }
-
-  } catch (err) {
-    console.error(err);
-    sendStatus("Erro: " + err.message, "error");
-    figma.notify("Falha na conversão ❌");
-  }
-};
