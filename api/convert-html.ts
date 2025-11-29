@@ -43,7 +43,7 @@ export default async function handler(req: any, res: any) {
   try {
     // 1. Inicializa o Gemini
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-3.0-pro-preview" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.0-preview" });
 
     // 2. Configura o Browser (A mágica acontece aqui)
     // Se estivermos no Vercel, usamos o @sparticuz/chromium. 
