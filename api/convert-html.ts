@@ -1,119 +1,134 @@
 // api/convert-html.ts
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { chromium } from "playwright";
 
 const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*", // se quiser pode trocar por origem específica
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-}
+};
 
 export default async function handler(req: any, res: any) {
-  // sempre seta CORS
+  // 1. Configura CORS
   for (const [key, value] of Object.entries(CORS_HEADERS)) {
-    res.setHeader(key, value)
+    res.setHeader(key, value);
   }
 
-  // 🔹 responde o preflight
   if (req.method === "OPTIONS") {
-    res.status(200).end()
-    return
+    res.status(200).end();
+    return;
   }
 
   if (req.method !== "POST") {
-    res.status(405).json({ error: "Method Not Allowed" })
-    return
+    res.status(405).json({ error: "Method Not Allowed" });
+    return;
   }
 
-  const apiKey = process.env.GEMINI_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    res
-      .status(500)
-      .json({ error: "GEMINI_API_KEY is not set in environment." })
-    return
+    res.status(500).json({ error: "GEMINI_API_KEY is not set." });
+    return;
   }
 
-  const { html, url, viewportWidth } = req.body || {}
+  const { html, url, viewportWidth } = req.body || {};
+  const targetWidth = typeof viewportWidth === "number" && viewportWidth > 0 ? viewportWidth : 1440;
 
-  if (!html || typeof html !== "string") {
-    res.status(400).json({ error: "Body must contain an 'html' string." })
-    return
+  if (!html && !url) {
+    res.status(400).json({ error: "Must provide 'html' or 'url'." });
+    return;
   }
 
-  const targetWidth =
-    typeof viewportWidth === "number" && viewportWidth > 0
-      ? viewportWidth
-      : 1440
-
+  let browser = null;
   try {
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+    // 2. Inicializa o Gemini
+    const genAI = new GoogleGenerativeAI(apiKey);
+    // Usamos o modelo Flash que suporta imagens e é rápido
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const prompt = `
-You are a layout conversion engine for Figma.
+    // 3. Usa o Playwright para renderizar e tirar print
+    // Nota: Em produção (Vercel), pode ser necessário configurar bibliotecas específicas para o Chromium.
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.setViewportSize({ width: targetWidth, height: 1200 });
 
-GOAL:
-- Receive an HTML snippet from a real product page.
-- Return a CLEAN, MINIMAL JSON specification for a Figma Auto Layout frame.
+    if (url) {
+      await page.goto(url, { waitUntil: "networkidle", timeout: 15000 }).catch(e => console.log("Timeout navegando, prosseguindo..."));
+    } else {
+      await page.setContent(html, { waitUntil: "networkidle" });
+    }
 
-TARGET_VIEWPORT_WIDTH: ${targetWidth}
+    // Tira o screenshot (visão computacional para a IA)
+    const screenshotBuffer = await page.screenshot({ fullPage: false });
+    const base64Image = screenshotBuffer.toString("base64");
 
-RULES:
-- Output ONLY valid JSON, no prose, no markdown.
-- JSON root must describe a frame:
-  {
-    "type": "FRAME",
-    "name": "string",
-    "layout": "VERTICAL" | "HORIZONTAL",
-    "spacing": number,
-    "padding": [top,right,bottom,left],
-    "fills": ["#RRGGBB"],
-    "children": [ ... ]
-  }
+    const imagePart = {
+      inlineData: {
+        data: base64Image,
+        mimeType: "image/png",
+      },
+    };
 
-- Children may be:
-  - TEXT nodes:
+    // 4. Prompt de Alta Fidelidade
+    const systemPrompt = `
+    You are an expert Figma Developer and UI Designer.
+    GOAL: Convert the provided Website Screenshot and HTML into a HIGH-FIDELITY Figma Auto Layout JSON specification.
+    
+    TARGET_WIDTH: ${targetWidth}px
+
+    STRICT GUIDELINES:
+    1. **Visual Fidelity**: Rely heavily on the IMAGE to get exact colors, background-colors, spacing, and visual hierarchy. Use the HTML only for structure and text content.
+    2. **Styling Details**: You MUST include properties for:
+       - "strokes" (borders): color and width.
+       - "cornerRadius": number (border-radius).
+       - "effects": drop shadows (type: "DROP_SHADOW").
+    3. **Layout**:
+       - Use "FRAME" for containers.
+       - Use "TEXT" for text.
+       - Use "RECTANGLE" for pure visual blocks or placeholders.
+       - Determine "layoutMode" (VERTICAL/HORIZONTAL) accurately.
+       - Calculate "itemSpacing" and "padding" precisely based on the image.
+    
+    JSON STRUCTURE:
     {
-      "type": "TEXT",
+      "type": "FRAME" | "TEXT" | "RECTANGLE",
       "name": "string",
-      "text": "string",
+      "layoutMode": "VERTICAL" | "HORIZONTAL" | "NONE",
+      "primaryAxisSizingMode": "FIXED" | "AUTO",
+      "counterAxisSizingMode": "FIXED" | "AUTO",
+      "primaryAxisAlignItems": "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN",
+      "counterAxisAlignItems": "MIN" | "CENTER" | "MAX",
+      "fills": [{ "type": "SOLID", "color": "#HEX", "opacity": 0-1 }],
+      "strokes": [{ "type": "SOLID", "color": "#HEX" }],
+      "strokeWeight": number,
+      "cornerRadius": number,
+      "itemSpacing": number,
+      "padding": { "top": number, "right": number, "bottom": number, "left": number },
+      "effects": [{ "type": "DROP_SHADOW", "color": "#HEX", "offset": { "x": 0, "y": 0 }, "radius": 0, "spread": 0 }],
+      "text": "string (only for TEXT type)",
       "fontSize": number,
-      "bold": boolean,
-      "color": "#RRGGBB"
-    }
-  - nested FRAME nodes (same shape as the root).
-
-- Ignore images, icons, and super complex styling.
-- Focus on hierarchy of content and sensible spacings.
-- Try to approximate the layout for a viewport width of ${targetWidth}px.
-
-HTML INPUT:
-${html}
-
-SOURCE URL (hint only, optional):
-${url || "N/A"}
-    `.trim()
-
-    const result = await model.generateContent(prompt)
-    const response = result.response
-    let text = response.text().trim()
-
-    // às vezes o modelo vem com ```json ... ```
-    text = text.replace(/```json/gi, "").replace(/```/g, "").trim()
-
-    let spec: any
-    try {
-      spec = JSON.parse(text)
-    } catch (err) {
-      console.error("Failed to parse JSON from model:", text)
-      throw err
+      "fontWeight": "Regular" | "Medium" | "Bold",
+      "textAlign": "LEFT" | "CENTER" | "RIGHT",
+      "children": [ ...recursive... ]
     }
 
-    res.status(200).json(spec)
+    Output ONLY valid JSON. No markdown code blocks.
+    `;
+
+    // 5. Envia para o Gemini (Imagem + Texto)
+    const result = await model.generateContent([imagePart, systemPrompt]);
+    const response = result.response;
+    let text = response.text().trim();
+
+    // Limpeza básica de markdown caso o modelo mande
+    text = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+
+    const spec = JSON.parse(text);
+    res.status(200).json(spec);
+
   } catch (err: any) {
-    console.error("Error in /api/convert-html:", err)
-    res.status(500).json({
-      error: "Failed to convert HTML to Figma spec.",
-      detail: String(err?.message || err),
-    })
+    console.error("Error in conversion:", err);
+    res.status(500).json({ error: "Conversion failed", details: err.message });
+  } finally {
+    if (browser) await browser.close();
   }
 }
