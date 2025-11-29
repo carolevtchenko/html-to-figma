@@ -1,134 +1,133 @@
-// code.ts – Figma Plugin
+// code.js – versão em JavaScript puro, sem "type", sem TS
 
-// Abre a UI
-figma.showUI(__html__, { width: 480, height: 520 })
+// Abre a interface do plugin
+figma.showUI(__html__, { width: 480, height: 420 })
 
-// Tipos básicos (ajusta se você já tem algo mais completo)
-type TextSpec = {
-  type: "TEXT"
-  name: string
-  text: string
-  fontSize: number
-  bold: boolean
-  color: string
-}
-
-type FrameSpec = {
-  type: "FRAME"
-  name: string
-  layout: "VERTICAL" | "HORIZONTAL"
-  spacing: number
-  padding: [number, number, number, number]
-  fills: string[]
-  children: Array<FrameSpec | TextSpec>
-}
-
-// Converte "#RRGGBB" em Paint do Figma
-function colorFromHex(hex: string): Paint {
-  const clean = hex.replace("#", "")
-  const r = parseInt(clean.slice(0, 2), 16) / 255
-  const g = parseInt(clean.slice(2, 4), 16) / 255
-  const b = parseInt(clean.slice(4, 6), 16) / 255
-  return {
-    type: "SOLID",
-    color: { r, g, b },
-  }
-}
-
-// Cria TEXT a partir do spec
-async function createTextNodeFromSpec(spec: TextSpec, parent: FrameNode) {
-  await figma.loadFontAsync({ family: "Inter", style: "Regular" }).catch(() =>
-    figma.loadFontAsync({ family: "Roboto", style: "Regular" })
-  )
-
-  const text = figma.createText()
-  text.name = spec.name
-  text.characters = spec.text
-
-  text.fontSize = spec.fontSize
-  text.fontName = {
-    family: "Inter",
-    style: spec.bold ? "Bold" : "Regular",
-  }
-
-  text.fills = [colorFromHex(spec.color)]
-  parent.appendChild(text)
-}
-
-// Cria FRAME a partir do spec (recursivo)
-async function createFrameFromSpec(spec: FrameSpec, parent: FrameNode | PageNode) {
-  const frame = figma.createFrame()
-  frame.name = spec.name
-  frame.layoutMode = spec.layout === "VERTICAL" ? "VERTICAL" : "HORIZONTAL"
-  frame.itemSpacing = spec.spacing
-  frame.paddingTop = spec.padding[0]
-  frame.paddingRight = spec.padding[1]
-  frame.paddingBottom = spec.padding[2]
-  frame.paddingLeft = spec.padding[3]
-  frame.counterAxisSizingMode = "AUTO"
-  frame.primaryAxisSizingMode = "AUTO"
-
-  if (spec.fills && spec.fills.length > 0) {
-    frame.fills = [colorFromHex(spec.fills[0])]
-  } else {
-    frame.fills = []
-  }
-
-  parent.appendChild(frame)
-
-  for (const child of spec.children || []) {
-    if (child.type === "FRAME") {
-      await createFrameFromSpec(child as FrameSpec, frame)
-    } else if (child.type === "TEXT") {
-      await createTextNodeFromSpec(child as TextSpec, frame)
-    }
-  }
-
-  return frame
-}
-
-// 📩 Handler de mensagens vindas da UI
-figma.ui.onmessage = async (msg) => {
-  if (msg.type !== "convert-via-api") return
-
-  const { html, url } = msg
-
-  // 🔹 AQUI entra o viewportWidth
-  let viewportWidth = 1440
-  const node = figma.currentPage.selection[0]
-  if (node && "width" in node) {
-    viewportWidth = node.width
+// Garante que as fontes necessárias estejam carregadas antes de escrever texto
+async function ensureFonts() {
+  try {
+    await figma.loadFontAsync({ family: "Inter", style: "Regular" })
+  } catch (e) {
+    // se não tiver Inter, deixa a fonte padrão
+    console.log("Não foi possível carregar Inter Regular, usando fonte padrão.", e)
   }
 
   try {
-    const res = await fetch(
-      "https://html-to-figma-chi.vercel.app/api/convert-html",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html, url, viewportWidth }),
+    await figma.loadFontAsync({ family: "Inter", style: "Medium" })
+  } catch (e) {
+    console.log("Não foi possível carregar Inter Medium, usando fonte padrão.", e)
+  }
+}
+
+// Converte #RRGGBB para cores do Figma (0–1)
+function hexToFigmaColor(hex) {
+  if (!hex) hex = "#FFFFFF"
+  let c = hex.replace("#", "")
+  if (c.length === 3) {
+    c = c[0] + c[0] + c[1] + c[1] + c[2] + c[2]
+  }
+  const num = parseInt(c, 16)
+  const r = ((num >> 16) & 255) / 255
+  const g = ((num >> 8) & 255) / 255
+  const b = (num & 255) / 255
+  return { r, g, b }
+}
+
+// Cria os nodes no Figma a partir do JSON que vem da API
+async function createFigmaNodesFromSpec(spec, viewportWidth) {
+  await ensureFonts()
+
+  // Frame raiz
+  const frame = figma.createFrame()
+  frame.name = spec.name || "Generated Layout"
+
+  // Usa a largura do frame selecionado, ou um fallback
+  const width = typeof viewportWidth === "number" ? viewportWidth : 1440
+  frame.resizeWithoutConstraints(width, 800)
+
+  // Auto layout vertical/horizontal
+  frame.layoutMode = spec.layout === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL"
+  frame.primaryAxisSizingMode = "AUTO"
+  frame.counterAxisSizingMode = "AUTO"
+  frame.itemSpacing = spec.spacing != null ? spec.spacing : 16
+
+  const padding = Array.isArray(spec.padding) ? spec.padding : [24, 24, 24, 24]
+  frame.paddingTop = padding[0]
+  frame.paddingRight = padding[1]
+  frame.paddingBottom = padding[2]
+  frame.paddingLeft = padding[3]
+
+  const fillHex = Array.isArray(spec.fills) && spec.fills.length > 0 ? spec.fills[0] : "#FFFFFF"
+  frame.fills = [
+    {
+      type: "SOLID",
+      color: hexToFigmaColor(fillHex),
+    },
+  ]
+
+  // Cria filhos (por enquanto só TEXT, que é o que a API já manda)
+  if (Array.isArray(spec.children)) {
+    for (const child of spec.children) {
+      if (child.type === "TEXT") {
+        const textNode = figma.createText()
+        textNode.name = child.name || "Text"
+        textNode.characters = child.text || ""
+        textNode.fontSize = child.fontSize || 16
+        textNode.fills = [
+          {
+            type: "SOLID",
+            color: hexToFigmaColor(child.color || "#000000"),
+          },
+        ]
+
+        if (child.bold) {
+          try {
+            textNode.fontName = { family: "Inter", style: "Medium" }
+          } catch (e) {
+            console.log("Erro ao aplicar fonte Medium, mantendo fonte padrão.", e)
+          }
+        }
+
+        frame.appendChild(textNode)
       }
-    )
+      // aqui depois dá pra ir adicionando suporte a outros tipos (FRAME dentro de FRAME, BUTTON etc)
+    }
+  }
+
+  figma.currentPage.selection = [frame]
+  figma.viewport.scrollAndZoomIntoView([frame])
+}
+
+// Recebe mensagens da UI
+figma.ui.onmessage = async (msg) => {
+  if (msg.type !== "convert-via-api") return
+
+  const html = msg.html || ""
+  const url = msg.url || ""
+
+  // tenta usar a largura do frame selecionado como viewport
+  let viewportWidth = 1440
+  const selection = figma.currentPage.selection[0]
+  if (selection && "width" in selection) {
+    viewportWidth = selection.width
+  }
+
+  try {
+    const res = await fetch("https://html-to-figma-chi.vercel.app/api/convert-html", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html, url, viewportWidth }),
+    })
 
     if (!res.ok) {
-      const text = await res.text()
-      console.error("Erro da API:", res.status, text)
-      figma.notify("API retornou erro: " + res.status)
-      return
+      throw new Error("HTTP " + res.status + " ao chamar API")
     }
 
-    const spec = (await res.json()) as FrameSpec
-
-    const page = figma.currentPage
-    const frame = await createFrameFromSpec(spec, page)
-
-    // usa viewportWidth para largura do frame raiz
-    frame.resizeWithoutConstraints(viewportWidth, frame.height)
-
-    figma.viewport.scrollAndZoomIntoView([frame])
-    figma.notify("Layout criado a partir do HTML ✨")
+    const spec = await res.json()
+    await createFigmaNodesFromSpec(spec, viewportWidth)
+    figma.notify("Layout gerado a partir do HTML 🎉")
   } catch (err) {
     console.error("Erro no plugin:", err)
-    figma.notify("Falha ao chamar API. Veja o console.")
+    figma.notify("Erro ao converter HTML. Veja o console do Figma.")
   }
 }
