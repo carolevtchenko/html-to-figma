@@ -1,9 +1,8 @@
-// api/convert-html.ts (Versão com Injeção de Tailwind)
+// api/convert-html.ts (Versão Inteligente: Detecta HTML Completo)
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import chromium from "@sparticuz/chromium";
 import { chromium as playwrightCore } from "playwright-core";
 
-// Configurações para rodar no Vercel
 chromium.setHeadlessMode = true;
 chromium.setGraphicsMode = false;
 
@@ -36,7 +35,6 @@ export default async function handler(req: any, res: any) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    // Mantém o Gemini 3.0 para inteligência máxima
     const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
 
     const executablePath = await chromium.executablePath();
@@ -51,35 +49,39 @@ export default async function handler(req: any, res: any) {
     await page.setViewportSize({ width: targetWidth, height: 1200 });
 
     if (url) {
-      // Se tiver URL, usa ela (geralmente já carrega o CSS certo)
       await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
     } else if (html) {
-      // --- O PULO DO GATO AQUI ---
-      // Injetamos o CDN do Tailwind e uma fonte padrão para garantir que fique bonito
-      const enhancedHtml = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <script src="https://cdn.tailwindcss.com"></script>
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-          <style>
-            body { font-family: 'Inter', sans-serif; background: #f5f5f5; margin: 0; }
-            /* Garante que o conteúdo ocupe a altura se necessário */
-            html, body { min-height: 100vh; } 
-          </style>
-        </head>
-        <body>
-          ${html}
-        </body>
-        </html>
-      `;
+      let finalHtml = html;
+
+      // VERIFICAÇÃO INTELIGENTE:
+      // Se o HTML já começa com doctype ou html, usamos ele puro.
+      // Caso contrário, injetamos o esqueleto padrão.
+      if (!html.trim().match(/^\s*<!DOCTYPE/i) && !html.trim().match(/^\s*<html/i)) {
+        finalHtml = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+            <style>
+              body { font-family: 'Inter', sans-serif; margin: 0; background: white; }
+              * { box-sizing: border-box; }
+            </style>
+          </head>
+          <body>
+            ${html}
+          </body>
+          </html>
+        `;
+      }
       
-      await page.setContent(enhancedHtml, { waitUntil: "networkidle" });
+      // Carrega o HTML e espera a rede ficar ociosa (para carregar fontes e scripts)
+      await page.setContent(finalHtml, { waitUntil: "networkidle", timeout: 60000 });
     } else {
-      throw new Error("Preciso de uma URL ou HTML.");
+      throw new Error("Preciso de URL ou HTML.");
     }
 
-    // Tira o Screenshot da página agora ESTILIZADA
     const screenshotBuffer = await page.screenshot({ fullPage: false });
     const base64Image = screenshotBuffer.toString("base64");
     
@@ -91,35 +93,44 @@ export default async function handler(req: any, res: any) {
     };
 
     const systemPrompt = `
-    You are an expert Figma Developer.
-    GOAL: Convert the provided Website Screenshot (which uses Tailwind) and HTML into a HIGH-FIDELITY Figma Auto Layout JSON.
-    TARGET_WIDTH: ${targetWidth}px
-
-    STRICT GUIDELINES:
-    1. **Visual Fidelity**: The screenshot is your source of truth for layout, alignment, and spacing.
-    2. **Auto Layout**: Use "layoutMode": "HORIZONTAL" for rows (like flex-row) and "VERTICAL" for columns (flex-col).
-    3. **Fill Container**: If an element spans the full width or grows to fill space, use "layoutGrow": 1.
-    4. **Styling**: Extract exact colors, borders, and rounded corners from the screenshot.
+    You are a Senior UI Engineer specializing in Figma Auto Layout.
     
+    INPUT: A screenshot of a web interface and its raw HTML.
+    GOAL: Recreate the layout in Figma JSON, adapting intelligently to the specific design pattern visible.
+
+    DECISION RULES:
+    1. **Detect Layout Pattern**: 
+       - **Is it a Dashboard?** (Left Sidebar + Right Content) -> Root Frame "layoutMode": "HORIZONTAL".
+       - **Is it a Landing Page?** -> Root Frame "layoutMode": "VERTICAL".
+    
+    2. **Smart Icon Detection**: 
+       - **Material Symbols/SVGs:** If you see small icons (dashboard, settings, arrows), create a FRAME 24x24px (Fixed Width/Height).
+       - Do NOT create giant colored blocks for icons. Keep them transparent or use the icon color.
+    
+    3. **Spacing & Hierarchy**:
+       - Use "itemSpacing" to match the whitespace.
+       - Group elements logically (e.g. Sidebar Links together, Form inputs together).
+
+    4. **Fill Container**:
+       - Use "layoutGrow": 1 for the main content area or flexible text/inputs.
+
     JSON STRUCTURE:
     {
       "type": "FRAME" | "TEXT",
       "name": "string",
-      "layoutMode": "VERTICAL" | "HORIZONTAL" | "NONE",
+      "layoutMode": "VERTICAL" | "HORIZONTAL",
       "layoutGrow": 0 | 1,
       "primaryAxisSizingMode": "FIXED" | "AUTO",
       "counterAxisSizingMode": "FIXED" | "AUTO",
-      "primaryAxisAlignItems": "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN",
-      "counterAxisAlignItems": "MIN" | "CENTER" | "MAX",
-      "fills": [{ "type": "SOLID", "color": "#HEX", "opacity": 0-1 }],
+      "width": number | null, 
+      "height": number | null,
+      "fills": [{ "type": "SOLID", "color": "#HEX", "opacity": number }],
       "strokes": [{ "type": "SOLID", "color": "#HEX" }],
       "cornerRadius": number,
-      "padding": { "top": number, "right": number, "bottom": number, "left": number },
       "itemSpacing": number,
-      "effects": [],
+      "padding": { "top": number, "right": number, "bottom": number, "left": number },
       "text": "string",
       "fontSize": number,
-      "fontWeight": "Regular" | "Medium" | "Bold",
       "textAlign": "LEFT" | "CENTER" | "RIGHT",
       "children": []
     }
@@ -135,8 +146,8 @@ export default async function handler(req: any, res: any) {
     res.status(200).json(spec);
 
   } catch (err: any) {
-    console.error("Erro na conversão:", err);
-    res.status(500).json({ error: "Falha na conversão", details: err.message });
+    console.error("Erro:", err);
+    res.status(500).json({ error: "Falha", details: err.message });
   } finally {
     if (browser) await browser.close();
   }
