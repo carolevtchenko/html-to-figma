@@ -1,14 +1,11 @@
-// code.js – versão em JavaScript puro, sem "type", sem TS
+// code.js – versão JS pura com construção recursiva dos nodes
 
-// Abre a interface do plugin
 figma.showUI(__html__, { width: 480, height: 420 })
 
-// Garante que as fontes necessárias estejam carregadas antes de escrever texto
 async function ensureFonts() {
   try {
     await figma.loadFontAsync({ family: "Inter", style: "Regular" })
   } catch (e) {
-    // se não tiver Inter, deixa a fonte padrão
     console.log("Não foi possível carregar Inter Regular, usando fonte padrão.", e)
   }
 
@@ -19,7 +16,6 @@ async function ensureFonts() {
   }
 }
 
-// Converte #RRGGBB para cores do Figma (0–1)
 function hexToFigmaColor(hex) {
   if (!hex) hex = "#FFFFFF"
   let c = hex.replace("#", "")
@@ -33,72 +29,96 @@ function hexToFigmaColor(hex) {
   return { r, g, b }
 }
 
-// Cria os nodes no Figma a partir do JSON que vem da API
+// Cria um node a partir de um spec (FRAME, TEXT, etc), recursivamente
+function createNodeFromSpec(spec) {
+  if (!spec || !spec.type) return null
+
+  if (spec.type === "TEXT") {
+    const textNode = figma.createText()
+    textNode.name = spec.name || "Text"
+    textNode.characters = spec.text || ""
+    if (spec.fontSize) textNode.fontSize = spec.fontSize
+    textNode.fills = [
+      {
+        type: "SOLID",
+        color: hexToFigmaColor(spec.color || "#000000"),
+      },
+    ]
+
+    if (spec.bold) {
+      try {
+        textNode.fontName = { family: "Inter", style: "Medium" }
+      } catch (e) {
+        console.log("Erro ao aplicar fonte Medium, mantendo fonte padrão.", e)
+      }
+    }
+
+    return textNode
+  }
+
+  if (spec.type === "FRAME") {
+    const frame = figma.createFrame()
+    frame.name = spec.name || "Frame"
+
+    // auto layout
+    frame.layoutMode = spec.layout === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL"
+    frame.primaryAxisSizingMode = "AUTO"
+    frame.counterAxisSizingMode = "AUTO"
+
+    if (spec.spacing != null) frame.itemSpacing = spec.spacing
+
+    const padding = Array.isArray(spec.padding) ? spec.padding : [24, 24, 24, 24]
+    frame.paddingTop = padding[0]
+    frame.paddingRight = padding[1]
+    frame.paddingBottom = padding[2]
+    frame.paddingLeft = padding[3]
+
+    const fillHex =
+      Array.isArray(spec.fills) && spec.fills.length > 0 ? spec.fills[0] : "#FFFFFF"
+    frame.fills = [
+      {
+        type: "SOLID",
+        color: hexToFigmaColor(fillHex),
+      },
+    ]
+
+    if (Array.isArray(spec.children)) {
+      for (const childSpec of spec.children) {
+        const childNode = createNodeFromSpec(childSpec)
+        if (childNode) {
+          frame.appendChild(childNode)
+        }
+      }
+    }
+
+    return frame
+  }
+
+  // se vier outro tipo que ainda não tratamos, ignora
+  return null
+}
+
 async function createFigmaNodesFromSpec(spec, viewportWidth) {
   await ensureFonts()
 
-  // Frame raiz
-  const frame = figma.createFrame()
-  frame.name = spec.name || "Generated Layout"
-
-  // Usa a largura do frame selecionado, ou um fallback
-  const width = typeof viewportWidth === "number" ? viewportWidth : 1440
-  frame.resizeWithoutConstraints(width, 800)
-
-  // Auto layout vertical/horizontal
-  frame.layoutMode = spec.layout === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL"
-  frame.primaryAxisSizingMode = "AUTO"
-  frame.counterAxisSizingMode = "AUTO"
-  frame.itemSpacing = spec.spacing != null ? spec.spacing : 16
-
-  const padding = Array.isArray(spec.padding) ? spec.padding : [24, 24, 24, 24]
-  frame.paddingTop = padding[0]
-  frame.paddingRight = padding[1]
-  frame.paddingBottom = padding[2]
-  frame.paddingLeft = padding[3]
-
-  const fillHex = Array.isArray(spec.fills) && spec.fills.length > 0 ? spec.fills[0] : "#FFFFFF"
-  frame.fills = [
-    {
-      type: "SOLID",
-      color: hexToFigmaColor(fillHex),
-    },
-  ]
-
-  // Cria filhos (por enquanto só TEXT, que é o que a API já manda)
-  if (Array.isArray(spec.children)) {
-    for (const child of spec.children) {
-      if (child.type === "TEXT") {
-        const textNode = figma.createText()
-        textNode.name = child.name || "Text"
-        textNode.characters = child.text || ""
-        textNode.fontSize = child.fontSize || 16
-        textNode.fills = [
-          {
-            type: "SOLID",
-            color: hexToFigmaColor(child.color || "#000000"),
-          },
-        ]
-
-        if (child.bold) {
-          try {
-            textNode.fontName = { family: "Inter", style: "Medium" }
-          } catch (e) {
-            console.log("Erro ao aplicar fonte Medium, mantendo fonte padrão.", e)
-          }
-        }
-
-        frame.appendChild(textNode)
-      }
-      // aqui depois dá pra ir adicionando suporte a outros tipos (FRAME dentro de FRAME, BUTTON etc)
-    }
+  // cria a árvore completa
+  const rootNode = createNodeFromSpec(spec)
+  if (!rootNode) {
+    figma.notify("Spec vazio ou tipo não suportado.")
+    return
   }
 
-  figma.currentPage.selection = [frame]
-  figma.viewport.scrollAndZoomIntoView([frame])
+  // se o root for frame, ajusta largura com o viewport
+  if (rootNode.type === "FRAME") {
+    const width = typeof viewportWidth === "number" ? viewportWidth : 1440
+    rootNode.resizeWithoutConstraints(width, rootNode.height)
+  }
+
+  figma.currentPage.appendChild(rootNode)
+  figma.currentPage.selection = [rootNode]
+  figma.viewport.scrollAndZoomIntoView([rootNode])
 }
 
-// Recebe mensagens da UI
 figma.ui.onmessage = async (msg) => {
   if (msg.type !== "convert-via-api") return
 
@@ -124,6 +144,7 @@ figma.ui.onmessage = async (msg) => {
     }
 
     const spec = await res.json()
+    console.log("Spec recebido da API:", spec)
     await createFigmaNodesFromSpec(spec, viewportWidth)
     figma.notify("Layout gerado a partir do HTML 🎉")
   } catch (err) {
