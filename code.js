@@ -1,187 +1,168 @@
-// Main script do plugin Figma
-// Responsável por:
-// - Mostrar a UI (ui.html)
-// - Receber o HTML enviado pela UI
-// - Chamar a API na Vercel
-// - Criar o layout no canvas a partir do JSON retornado
+// code.ts – Figma plugin main
 
-const API_ENDPOINT = "https://html-to-figma-chi.vercel.app/api/convert-html";
-
-// Abre a UI embutida (__html__ vem do ui.html)
+// Mostra a UI do ui.html
 figma.showUI(__html__, {
   width: 520,
-  height: 480,
-});
+  height: 420,
+})
 
-// Controle simples para não carregar fonte toda hora
-let fontsLoaded = false;
-async function ensureFonts() {
-  if (fontsLoaded) return;
-  // Usa Roboto Regular, que é padrão do Figma
-  await figma.loadFontAsync({ family: "Roboto", style: "Regular" });
-  fontsLoaded = true;
+// Tipos da especificação vinda da API
+type TextSpec = {
+  type: "TEXT"
+  name?: string
+  text: string
+  fontSize?: number
+  bold?: boolean
+  color?: string
 }
 
+type FrameSpec = {
+  type: "FRAME"
+  name?: string
+  layout?: "VERTICAL" | "HORIZONTAL"
+  spacing?: number
+  padding?: [number, number, number, number]
+  fills?: string[]
+  children?: NodeSpec[]
+}
+
+type NodeSpec = TextSpec | FrameSpec
+
 // Converte "#RRGGBB" em Paint do Figma
-function hexToSolidPaint(hex) {
-  if (!hex || typeof hex !== "string") {
+function hexToPaint(hex: string): Paint {
+  if (!hex) {
     return {
       type: "SOLID",
       color: { r: 1, g: 1, b: 1 },
-    };
+    }
   }
 
-  const cleaned = hex.replace("#", "").trim();
-  if (cleaned.length !== 6) {
-    return {
-      type: "SOLID",
-      color: { r: 1, g: 1, b: 1 },
-    };
+  if (hex.startsWith("#")) hex = hex.slice(1)
+  if (hex.length === 3) {
+    hex = hex
+      .split("")
+      .map((c) => c + c)
+      .join("")
   }
 
-  const r = parseInt(cleaned.slice(0, 2), 16) / 255;
-  const g = parseInt(cleaned.slice(2, 4), 16) / 255;
-  const b = parseInt(cleaned.slice(4, 6), 16) / 255;
+  const num = parseInt(hex, 16)
+  const r = ((num >> 16) & 255) / 255
+  const g = ((num >> 8) & 255) / 255
+  const b = (num & 255) / 255
 
   return {
     type: "SOLID",
     color: { r, g, b },
-  };
+  }
 }
 
-// Cria um TEXT node a partir do spec
-async function createTextNodeFromSpec(spec) {
-  await ensureFonts();
-
-  const node = figma.createText();
-  node.name = spec.name || "Text";
-  node.characters = spec.text || "";
-
-  if (typeof spec.fontSize === "number") {
-    node.fontSize = spec.fontSize;
-  }
-  if (spec.bold) {
-    try {
-      await figma.loadFontAsync({ family: "Roboto", style: "Bold" });
-      node.fontName = { family: "Roboto", style: "Bold" };
-    } catch (e) {
-      // se não achar Bold, ignora e fica Regular
+// Cria node Figma a partir de um spec
+function createNodeFromSpec(spec: NodeSpec): SceneNode {
+  if (spec.type === "TEXT") {
+    const t = figma.createText()
+    t.name = spec.name || "Text"
+    t.fontName = {
+      family: "Inter",
+      style: spec.bold ? "Bold" : "Regular",
     }
+    if (spec.fontSize) {
+      t.fontSize = spec.fontSize
+    }
+    t.characters = spec.text || ""
+    t.fills = [hexToPaint(spec.color || "#000000")]
+    return t
   }
 
-  if (spec.color) {
-    node.fills = [hexToSolidPaint(spec.color)];
-  }
+  if (spec.type === "FRAME") {
+    const f = figma.createFrame()
+    f.name = spec.name || "Frame"
 
-  return node;
-}
+    // Auto Layout
+    f.layoutMode = spec.layout === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL"
+    f.itemSpacing = spec.spacing ?? 16
 
-// Cria um FRAME (com children recursivos) a partir do spec
-async function createFrameFromSpec(spec) {
-  const frame = figma.createFrame();
+    const [pt, pr, pb, pl] = spec.padding ?? [24, 24, 24, 24]
+    f.paddingTop = pt
+    f.paddingRight = pr
+    f.paddingBottom = pb
+    f.paddingLeft = pl
 
-  frame.name = spec.name || "Converted Layout";
+    if (spec.fills && spec.fills.length > 0) {
+      f.fills = spec.fills.map(hexToPaint)
+    } else {
+      f.fills = [hexToPaint("#FFFFFF")]
+    }
 
-  // Auto Layout
-  const layout = spec.layout === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL";
-  frame.layoutMode = layout;
-  frame.counterAxisSizingMode = "AUTO";
-  frame.primaryAxisSizingMode = "AUTO";
-
-  if (typeof spec.spacing === "number") {
-    frame.itemSpacing = spec.spacing;
-  } else {
-    frame.itemSpacing = 16;
-  }
-
-  const padding = Array.isArray(spec.padding) && spec.padding.length === 4
-    ? spec.padding
-    : [40, 40, 40, 40];
-
-  frame.paddingTop = padding[0];
-  frame.paddingRight = padding[1];
-  frame.paddingBottom = padding[2];
-  frame.paddingLeft = padding[3];
-
-  if (Array.isArray(spec.fills) && spec.fills.length > 0) {
-    frame.fills = [hexToSolidPaint(spec.fills[0])];
-  } else {
-    frame.fills = [hexToSolidPaint("#FFFFFF")];
-  }
-
-  // Children
-  if (Array.isArray(spec.children)) {
-    for (const child of spec.children) {
-      if (!child || typeof child !== "object") continue;
-
-      let childNode = null;
-
-      if (child.type === "TEXT") {
-        childNode = await createTextNodeFromSpec(child);
-      } else if (child.type === "FRAME") {
-        childNode = await createFrameFromSpec(child);
-      }
-
-      if (childNode) {
-        childNode.x = 0;
-        childNode.y = 0;
-        frame.appendChild(childNode);
+    if (Array.isArray(spec.children)) {
+      for (const child of spec.children) {
+        const node = createNodeFromSpec(child)
+        f.appendChild(node)
       }
     }
+
+    // tamanho deixa o Auto Layout cuidar – nada de resize(100,100)
+    return f
   }
 
-  return frame;
+  // fallback
+  const fallback = figma.createFrame()
+  fallback.name = "Unsupported"
+  return fallback
 }
 
-// Handler das mensagens vindas da UI
+// Escuta mensagens da UI
 figma.ui.onmessage = async (msg) => {
-  if (msg.type !== "convert-via-api") return;
+  if (msg.type !== "convert-via-api") return
 
-  const html = (msg.html || "").trim();
-  const url = (msg.url || "").trim();
-
-  if (!html) {
-    figma.notify("Nenhum HTML recebido da UI.");
-    return;
-  }
+  const { html, url } = msg
 
   try {
-    figma.notify("Enviando HTML para a API…");
+    figma.ui.postMessage({
+      type: "status",
+      message: "Chamando API…",
+    })
 
-    const res = await fetch(API_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html, url }),
-    });
+    const res = await fetch(
+      "https://html-to-figma-chi.vercel.app/api/convert-html",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html, url }),
+      }
+    )
 
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error("API error:", res.status, text);
-      figma.notify("Erro na API (" + res.status + "). Veja o console.");
-      return;
+      const text = await res.text()
+      console.error("Erro na API:", res.status, text)
+      figma.ui.postMessage({
+        type: "error",
+        message: `API retornou ${res.status}`,
+      })
+      return
     }
 
-    const spec = await res.json();
+    const spec: FrameSpec = await res.json()
+    console.log("Spec recebido da API:", spec)
 
-    if (!spec || spec.type !== "FRAME") {
-      console.error("Spec inesperado da API:", spec);
-      figma.notify("Resposta da API não está no formato esperado.");
-      return;
-    }
+    // 🔹 carrega fontes antes de criar qualquer TEXT
+    await figma.loadFontAsync({ family: "Inter", style: "Regular" })
+    await figma.loadFontAsync({ family: "Inter", style: "Bold" })
 
-    const rootFrame = await createFrameFromSpec(spec);
+    const rootNode = createNodeFromSpec(spec)
 
-    // Centraliza na viewport
-    const vp = figma.viewport;
-    rootFrame.x = vp.center.x - rootFrame.width / 2;
-    rootFrame.y = vp.center.y - rootFrame.height / 2;
+    figma.currentPage.appendChild(rootNode)
+    figma.currentPage.selection = [rootNode]
+    figma.viewport.scrollAndZoomIntoView([rootNode])
 
-    figma.currentPage.selection = [rootFrame];
-    figma.viewport.scrollAndZoomIntoView([rootFrame]);
-
-    figma.notify("Layout criado a partir do HTML!");
+    figma.ui.postMessage({
+      type: "status",
+      message: "Layout criado no canvas ✅",
+    })
   } catch (err) {
-    console.error("Erro no plugin:", err);
-    figma.notify("Erro ao converter HTML. Veja o console do plugin.");
+    console.error("Erro no plugin:", err)
+    figma.ui.postMessage({
+      type: "error",
+      message: String(err),
+    })
   }
-};
+}
