@@ -1,173 +1,109 @@
-// code.js – HTML Page → Figma Auto Layout (API)
+// api/convert-html.ts
+import { GoogleGenerativeAI } from "@google/generative-ai"
 
-// Mostra a UI definida em ui.html
-figma.showUI(__html__, { width: 480, height: 520 })
+export default async function handler(req: any, res: any) {
+  // 🔹 CORS – sempre setar antes de tudo
+  res.setHeader("Access-Control-Allow-Origin", "*")
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS")
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type")
 
-// Ouve mensagens vindas da UI
-figma.ui.onmessage = async (msg) => {
-  if (msg.type === "convert-via-api") {
-    const { html, url } = msg
-
-    try {
-      const spec = await callBackend(html, url)
-      console.log("Spec recebido da API:", spec)
-
-      const rootNode = await createNodeFromSpec(spec)
-      if (rootNode) {
-        figma.currentPage.selection = [rootNode]
-        figma.viewport.scrollAndZoomIntoView([rootNode])
-        figma.notify("Layout criado a partir do HTML ✨")
-      } else {
-        figma.notify("A API não retornou um layout válido.")
-      }
-    } catch (err) {
-      console.error("Erro no plugin:", err)
-      figma.notify("Erro ao criar layout. Veja o console para detalhes.")
-    }
+  // Responde preflight (OPTIONS)
+  if (req.method === "OPTIONS") {
+    res.status(200).end()
+    return
   }
-}
 
-// Chama a API na Vercel
-async function callBackend(html, url) {
-  const res = await fetch(
-    "https://html-to-figma-chi.vercel.app/api/convert-html",
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Only POST method is allowed." })
+    return
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    res
+      .status(500)
+      .json({ error: "GEMINI_API_KEY is not set in environment." })
+    return
+  }
+
+  const { html, url } = req.body || {}
+
+  if (!html || typeof html !== "string") {
+    res.status(400).json({ error: "Body must contain an 'html' string." })
+    return
+  }
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey)
+
+    // modelo que já testamos via curl
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+
+    const prompt = `
+You are a layout conversion engine for Figma.
+
+GOAL:
+- Receive an HTML snippet from a real product page.
+- Return a CLEAN, MINIMAL JSON specification for a Figma Auto Layout frame.
+
+RULES:
+- Output ONLY valid JSON, no prose, no markdown.
+- JSON root must describe a frame:
+  {
+    "type": "FRAME",
+    "name": "string",
+    "layout": "VERTICAL" | "HORIZONTAL",
+    "spacing": number,
+    "padding": [top,right,bottom,left],
+    "fills": ["#RRGGBB"],
+    "children": [ ... ]
+  }
+
+- Children may be:
+  - TEXT nodes:
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html, url }),
+      "type": "TEXT",
+      "name": "string",
+      "text": "string",
+      "fontSize": number,
+      "bold": boolean,
+      "color": "#RRGGBB"
     }
-  )
+  - nested FRAME nodes (same shape as the root).
 
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`API error ${res.status}: ${text}`)
+- Ignore images, icons, and super complex styling.
+- Focus on hierarchy of content and sensible spacings.
+
+HTML INPUT:
+${html}
+
+SOURCE URL (hint only, optional):
+${url || "N/A"}
+    `.trim()
+
+    const result = await model.generateContent(prompt)
+    const response = result.response
+    let text = response.text().trim()
+
+    // Remove blocos ```json ... ``` se o modelo insistir em mandar
+    text = text.replace(/```json/gi, "").replace(/```/g, "").trim()
+
+    let spec: any
+    try {
+      spec = JSON.parse(text)
+    } catch (err) {
+      console.error("Failed to parse JSON from model:", text)
+      throw err
+    }
+
+    // 🔹 garantir que a resposta também leva os headers de CORS
+    res.setHeader("Access-Control-Allow-Origin", "*")
+    res.status(200).json(spec)
+  } catch (err: any) {
+    console.error("Error in /api/convert-html:", err)
+    res.status(500).json({
+      error: "Failed to convert HTML to Figma spec.",
+      detail: String(err?.message || err),
+    })
   }
-
-  return await res.json()
-}
-
-// Cria a árvore de nós a partir do spec raiz
-async function createNodeFromSpec(spec) {
-  if (!spec || !spec.type) return null
-  return await createNodeRecursive(spec)
-}
-
-// Recursivo: FRAME / TEXT
-async function createNodeRecursive(spec) {
-  if (spec.type === "FRAME") {
-    const frame = figma.createFrame()
-    frame.name = spec.name || "Frame"
-
-    // Auto Layout
-    frame.layoutMode = spec.layout === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL"
-    frame.primaryAxisSizingMode = "AUTO"
-    frame.counterAxisSizingMode = "AUTO"
-    frame.itemSpacing = typeof spec.spacing === "number" ? spec.spacing : 16
-
-    const padding = Array.isArray(spec.padding)
-      ? spec.padding
-      : [16, 16, 16, 16]
-    frame.paddingTop = padding[0]
-    frame.paddingRight = padding[1]
-    frame.paddingBottom = padding[2]
-    frame.paddingLeft = padding[3]
-
-    if (Array.isArray(spec.fills) && spec.fills.length > 0) {
-      frame.fills = [
-        {
-          type: "SOLID",
-          color: hexToRgb(spec.fills[0]),
-        },
-      ]
-    } else {
-      frame.fills = [
-        {
-          type: "SOLID",
-          color: { r: 1, g: 1, b: 1 },
-        },
-      ]
-    }
-
-    // Posição inicial mais ou menos no centro da viewport
-    frame.x = figma.viewport.center.x
-    frame.y = figma.viewport.center.y
-
-    if (Array.isArray(spec.children)) {
-      for (const childSpec of spec.children) {
-        const child = await createNodeRecursive(childSpec)
-        if (child) frame.appendChild(child)
-      }
-    }
-
-    return frame
-  }
-
-  if (spec.type === "TEXT") {
-    // 🔹 FIX PRINCIPAL: carregar a fonte ANTES de mexer em characters
-    const regularFont = { family: "Inter", style: "Regular" }
-
-    // Se você preferir SF Pro Text, troque aqui por:
-    // const regularFont = { family: "SF Pro Text", style: "Regular" }
-    await figma.loadFontAsync(regularFont)
-
-    const text = figma.createText()
-    text.name = spec.name || "Text"
-    text.fontName = regularFont
-
-    if (typeof spec.fontSize === "number") {
-      text.fontSize = spec.fontSize
-    }
-
-    // Só depois de carregar a fonte e setar fontName
-    text.characters = spec.text || ""
-
-    if (spec.color) {
-      text.fills = [
-        {
-          type: "SOLID",
-          color: hexToRgb(spec.color),
-        },
-      ]
-    }
-
-    // Se o spec marcar como bold, tenta usar Inter Bold
-    if (spec.bold) {
-      try {
-        const boldFont = { family: "Inter", style: "Bold" }
-        await figma.loadFontAsync(boldFont)
-        text.fontName = boldFont
-      } catch (err) {
-        console.warn(
-          "Não foi possível carregar Inter Bold, mantendo Regular.",
-          err
-        )
-      }
-    }
-
-    return text
-  }
-
-  // Outros tipos não são tratados
-  return null
-}
-
-// Converte "#RRGGBB" para { r, g, b } no intervalo 0–1
-function hexToRgb(hex) {
-  if (!hex || typeof hex !== "string") {
-    return { r: 1, g: 1, b: 1 }
-  }
-
-  let clean = hex.replace("#", "")
-  if (clean.length === 3) {
-    clean = clean
-      .split("")
-      .map((c) => c + c)
-      .join("")
-  }
-
-  const r = parseInt(clean.slice(0, 2), 16) / 255
-  const g = parseInt(clean.slice(2, 4), 16) / 255
-  const b = parseInt(clean.slice(4, 6), 16) / 255
-
-  return { r, g, b }
 }
