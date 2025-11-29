@@ -119,6 +119,13 @@ async function buildFromSpec(spec) {
 // Recebe mensagem da UI (html + url) e chama a API na Vercel
 figma.ui.onmessage = async (msg) => {
   if (msg.type === "convert-via-api") {
+    const { html, url } = msg
+    // 🔹 PEGA A LARGURA DO FRAME SELECIONADO OU USA 1440
+    let viewportWidth = 1440
+    const node = figma.currentPage.selection[0]
+    if (node && "width" in node) {
+      viewportWidth = node.width
+    }
     try {
       const response = await fetch(
         "https://html-to-figma-chi.vercel.app/api/convert-html",
@@ -128,6 +135,8 @@ figma.ui.onmessage = async (msg) => {
           body: JSON.stringify({
             html: msg.html,
             url: msg.url || null,
+            body: JSON.stringify({ html, url, viewportWidth }), // <- AGORA VAI
+
           }),
         }
       )
