@@ -1,154 +1,174 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <title>HTML → Figma (API)</title>
-    <style>
-      body {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-          sans-serif;
-        margin: 16px;
-      }
-      label {
-        font-size: 12px;
-        font-weight: 600;
-        display: block;
-        margin-bottom: 4px;
-      }
-      input[type="text"] {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 6px 8px;
-        margin-bottom: 8px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        font-size: 12px;
-      }
-      textarea {
-        width: 100%;
-        height: 220px;
-        box-sizing: border-box;
-        margin-bottom: 8px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        font-size: 11px;
-        font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas,
-          "Liberation Mono", "Courier New", monospace;
-        padding: 8px;
-      }
-      .row {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 8px;
-      }
-      button {
-        padding: 8px 12px;
-        border-radius: 6px;
-        border: none;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 500;
-      }
-      #fetch-url {
-        background: #f3f3f3;
-      }
-      #convert {
-        background: #18a0fb;
-        color: white;
-      }
-      #status {
-        font-size: 11px;
-        margin-top: 4px;
-        min-height: 14px;
-        color: #555;
-      }
-    </style>
-  </head>
-  <body>
-    <h3 style="margin-top: 0">HTML Page → Figma Auto Layout (API)</h3>
-    <p style="font-size: 11px; color: #555; margin-top: 0">
-      1) Digite uma URL e clique em <strong>Carregar URL</strong> ou cole o
-      HTML manualmente.<br />
-      2) Clique em <strong>Enviar para o Figma</strong>. O plugin manda o HTML
-      para uma API externa que devolve o layout.
-    </p>
+// code.js – Com feedback de status em tempo real
 
-    <label for="url-input">URL da página</label>
-    <div class="row">
-      <input
-        id="url-input"
-        type="text"
-        placeholder="https://meusite.com"
-        spellcheck="false"
-      />
-      <button id="fetch-url">Carregar URL</button>
-    </div>
+figma.showUI(__html__, { width: 400, height: 550 });
 
-    <label for="html-input">HTML da página (editável)</label>
-    <textarea
-      id="html-input"
-      placeholder="Cole aqui o HTML da página (ou carregue a partir da URL)..."
-    ></textarea>
+// Função auxiliar para mandar status para a UI
+function sendStatus(text, state = "loading") {
+  figma.ui.postMessage({ type: "update-status", text, state });
+}
 
-    <button id="convert">Enviar para o Figma</button>
-    <div id="status"></div>
+// Carrega fontes
+async function ensureFonts() {
+  const fonts = [
+    { family: "Inter", style: "Regular" },
+    { family: "Inter", style: "Medium" },
+    { family: "Inter", style: "Bold" },
+  ];
+  for (const font of fonts) {
+    try { await figma.loadFontAsync(font); } catch (e) {}
+  }
+}
 
-    <script>
-      const urlInput = document.getElementById("url-input")
-      const htmlInput = document.getElementById("html-input")
-      const statusEl = document.getElementById("status")
-      const fetchBtn = document.getElementById("fetch-url")
-      const convertBtn = document.getElementById("convert")
+function hexToFigmaColor(hex) {
+  if (!hex) return { r: 1, g: 1, b: 1 };
+  let c = hex.replace("#", "").trim();
+  if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
+  const num = parseInt(c, 16);
+  return {
+    r: ((num >> 16) & 255) / 255,
+    g: ((num >> 8) & 255) / 255,
+    b: (num & 255) / 255,
+  };
+}
 
-      function setStatus(msg, isError = false) {
-        statusEl.textContent = msg || ""
-        statusEl.style.color = isError ? "#c00" : "#555"
+function createNodeFromSpec(spec) {
+  if (!spec || !spec.type) return null;
+  let node;
+
+  if (spec.type === "TEXT") {
+    node = figma.createText();
+    node.name = spec.name || "Text";
+    node.characters = spec.text || " ";
+    if (spec.fontSize) node.fontSize = spec.fontSize;
+    if (spec.fontWeight === "Bold") try { node.fontName = { family: "Inter", style: "Bold" }; } catch(e){}
+    else if (spec.fontWeight === "Medium") try { node.fontName = { family: "Inter", style: "Medium" }; } catch(e){}
+    
+    if (spec.textAlign === "CENTER") node.textAlignHorizontal = "CENTER";
+    if (spec.textAlign === "RIGHT") node.textAlignHorizontal = "RIGHT";
+
+    if (spec.fills && spec.fills.length) {
+      node.fills = spec.fills.map(f => ({
+        type: "SOLID",
+        color: hexToFigmaColor(f.color),
+        opacity: f.opacity ?? 1
+      }));
+    }
+  } 
+  else if (spec.type === "FRAME" || spec.type === "RECTANGLE") {
+    node = figma.createFrame();
+    node.name = spec.name || "Container";
+    
+    if (spec.layoutMode && spec.layoutMode !== "NONE") {
+      node.layoutMode = spec.layoutMode;
+      node.itemSpacing = spec.itemSpacing || 0;
+      node.primaryAxisSizingMode = spec.primaryAxisSizingMode === "FIXED" ? "FIXED" : "AUTO";
+      node.counterAxisSizingMode = spec.counterAxisSizingMode === "FIXED" ? "FIXED" : "AUTO";
+      if (spec.primaryAxisAlignItems) node.primaryAxisAlignItems = spec.primaryAxisAlignItems;
+      if (spec.counterAxisAlignItems) node.counterAxisAlignItems = spec.counterAxisAlignItems;
+      if (spec.padding) {
+        node.paddingTop = spec.padding.top || 0;
+        node.paddingRight = spec.padding.right || 0;
+        node.paddingBottom = spec.padding.bottom || 0;
+        node.paddingLeft = spec.padding.left || 0;
       }
+    }
 
-      // Carrega HTML direto da URL (no contexto da UI)
-      fetchBtn.onclick = async () => {
-        const url = (urlInput.value || "").trim()
-        if (!url) {
-          setStatus("Informe uma URL para carregar.", true)
-          return
+    if (spec.fills && spec.fills.length) {
+      node.fills = spec.fills.map(f => ({
+        type: "SOLID",
+        color: hexToFigmaColor(f.color),
+        opacity: f.opacity ?? 1
+      }));
+    }
+
+    if (spec.strokes && spec.strokes.length) {
+      node.strokes = spec.strokes.map(s => ({
+        type: "SOLID",
+        color: hexToFigmaColor(s.color)
+      }));
+      if (spec.strokeWeight) node.strokeWeight = spec.strokeWeight;
+    }
+
+    if (spec.cornerRadius) node.cornerRadius = spec.cornerRadius;
+
+    if (spec.effects && spec.effects.length) {
+        const validEffects = [];
+        for (const e of spec.effects) {
+            if (e.type === "DROP_SHADOW") {
+                const c = hexToFigmaColor(e.color || "#000000");
+                validEffects.push({
+                    type: "DROP_SHADOW",
+                    color: { r: c.r, g: c.g, b: c.b, a: 0.25 },
+                    offset: e.offset || { x: 0, y: 4 },
+                    radius: e.radius || 4,
+                    visible: true,
+                    blendMode: "NORMAL"
+                });
+            }
         }
+        if (validEffects.length) node.effects = validEffects;
+    }
 
-        try {
-          setStatus("Carregando HTML da URL...")
-          const res = await fetch(url)
-          if (!res.ok) throw new Error("Status HTTP: " + res.status)
-          const html = await res.text()
-          htmlInput.value = html
-          setStatus("HTML carregado. Revise/ajuste se quiser e envie para o Figma.")
-        } catch (err) {
-          console.error(err)
-          setStatus("Erro ao carregar a URL (CORS/bloqueio é comum).", true)
-        }
+    if (spec.children && Array.isArray(spec.children)) {
+      for (const childSpec of spec.children) {
+        const childNode = createNodeFromSpec(childSpec);
+        if (childNode) node.appendChild(childNode);
       }
+    }
+  }
+  return node;
+}
 
-      // Envia HTML bruto + URL para o code.js
-      convertBtn.onclick = () => {
-        const html = (htmlInput.value || "").trim()
-        const url = (urlInput.value || "").trim()
+figma.ui.onmessage = async (msg) => {
+  if (msg.type !== "convert-via-api") return;
 
-        if (!html) {
-          setStatus("Cole ou carregue o HTML antes de enviar.", true)
-          return
-        }
+  const { html, url } = msg;
+  let viewportWidth = 1440;
+  if (figma.currentPage.selection.length > 0) {
+     const s = figma.currentPage.selection[0];
+     if(s.width) viewportWidth = Math.floor(s.width);
+  }
 
-        parent.postMessage(
-          {
-            pluginMessage: {
-              type: "convert-via-api",
-              html,
-              url,
-            },
-          },
-          "*"
-        )
+  try {
+    // 1. Feedback inicial
+    sendStatus("Conectando à IA... (Aguarde ~30s)", "loading");
 
-        setStatus("HTML enviado para o plugin. Aguarde o layout aparecer no canvas.")
-      }
-    </script>
-  </body>
-</html>
+    const apiUrl = "https://html-to-figma-chi.vercel.app/api/convert-html"; 
+    
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html, url, viewportWidth }),
+    });
+
+    if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || "Erro HTTP " + res.status);
+    }
+
+    // 2. Feedback de processamento
+    sendStatus("IA respondeu! Construindo elementos no Figma...", "loading");
+
+    const spec = await res.json();
+    await ensureFonts();
+    const rootNode = createNodeFromSpec(spec);
+
+    if (rootNode) {
+      if(rootNode.type === "FRAME") rootNode.resizeWithoutConstraints(viewportWidth, rootNode.height);
+      figma.currentPage.appendChild(rootNode);
+      figma.currentPage.selection = [rootNode];
+      figma.viewport.scrollAndZoomIntoView([rootNode]);
+      
+      // 3. Sucesso final
+      sendStatus("Pronto! Layout gerado com sucesso.", "success");
+      figma.notify("Layout gerado! 🎉");
+    } else {
+      throw new Error("JSON inválido retornado pela IA.");
+    }
+
+  } catch (err) {
+    console.error(err);
+    sendStatus("Erro: " + err.message, "error");
+    figma.notify("Falha na conversão ❌");
+  }
+};
