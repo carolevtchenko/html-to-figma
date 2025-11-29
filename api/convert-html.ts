@@ -1,4 +1,4 @@
-// api/convert-html.ts (Versão com Correção de Fontes e Ícones)
+// api/convert-html.ts (Versão Blindada: Força Ícones e Layout)
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import chromium from "@sparticuz/chromium";
 import { chromium as playwrightCore } from "playwright-core";
@@ -29,13 +29,13 @@ export default async function handler(req: any, res: any) {
   }
 
   const { html, url, viewportWidth } = req.body || {};
-  // Forçamos 1440px para garantir que o menu lateral não colapse
-  const targetWidth = Math.max(viewportWidth || 1440, 1440);
+  const targetWidth = viewportWidth || 1440;
 
   let browser = null;
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
+    // Usamos o Gemini 3.0 Pro, que é o melhor visualmente
     const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
 
     const executablePath = await chromium.executablePath();
@@ -47,33 +47,53 @@ export default async function handler(req: any, res: any) {
     });
 
     const page = await browser.newPage();
-    // Altura grande para pegar a tela toda
-    await page.setViewportSize({ width: targetWidth, height: 1000 });
+    await page.setViewportSize({ width: targetWidth, height: 1200 });
 
     if (url) {
       await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
     } else if (html) {
-      let finalHtml = html;
+      // --- A CORREÇÃO MÁGICA ---
+      // Mesmo se o HTML vier "congelado", nós injetamos os links de fontes vitais no topo.
+      // Isso conserta os ícones quebrados.
+      const criticalHead = `
+        <head>
+          <script src="https://cdn.tailwindcss.com"></script>
+          <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+          <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+          <style>
+            /* Força renderização correta de ícones para a IA não se perder */
+            .material-symbols-outlined, [class*="material-symbols"] {
+              font-family: 'Material Symbols Outlined' !important;
+              font-weight: normal;
+              font-style: normal;
+              font-size: 24px;
+              line-height: 1;
+              letter-spacing: normal;
+              text-transform: none;
+              display: inline-block;
+              white-space: nowrap;
+              word-wrap: normal;
+              direction: ltr;
+            }
+          </style>
+        </head>
+      `;
       
-      // Se não tiver estrutura completa, injeta. Se tiver (seu caso), usa como está.
-      if (!html.trim().match(/^\s*<!DOCTYPE/i) && !html.trim().match(/^\s*<html/i)) {
-         // (Código de injeção anterior omitido para brevidade, mas o seu HTML já é completo)
+      // Se o HTML já tem <head>, inserimos antes de fechar. Se não tem, adicionamos no começo.
+      let enhancedHtml = html;
+      if (html.includes("</head>")) {
+        enhancedHtml = html.replace("</head>", criticalHead + "</head>");
+      } else {
+        enhancedHtml = `<!DOCTYPE html><html>${criticalHead}<body>${html}</body></html>`;
       }
-      
-      await page.setContent(finalHtml, { waitUntil: "networkidle", timeout: 60000 });
+
+      await page.setContent(enhancedHtml, { waitUntil: "networkidle", timeout: 60000 });
     } else {
       throw new Error("Preciso de URL ou HTML.");
     }
 
-    // --- CORREÇÃO CRÍTICA: ESPERAR FONTES ---
-    // Isso garante que os ícones do Material Symbols carreguem antes do print
-    try {
-      await page.evaluate(() => document.fonts.ready);
-      // Espera extra de 1s só por segurança para renderização visual
-      await new Promise(r => setTimeout(r, 1000));
-    } catch (e) {
-      console.log("Erro esperando fontes, seguindo...");
-    }
+    // Espera explícita para fontes carregarem (vital para ícones)
+    try { await page.evaluate(() => document.fonts.ready); } catch(e){}
 
     const screenshotBuffer = await page.screenshot({ fullPage: false });
     const base64Image = screenshotBuffer.toString("base64");
@@ -86,26 +106,24 @@ export default async function handler(req: any, res: any) {
     };
 
     const systemPrompt = `
-    You are a Senior UI Engineer specializing in Figma Auto Layout.
+    You are a Senior UI Engineer.
     
-    INPUT: A screenshot of a web interface and its raw HTML.
-    GOAL: Recreate the layout in Figma JSON with pixel-perfect structure.
+    INPUT: A screenshot of a Dashboard UI and its raw HTML.
+    GOAL: Recreate the layout in Figma JSON pixel-perfectly.
 
-    CRITICAL RULES FOR THIS SPECIFIC DESIGN:
-    1. **ICON HANDLING (Most Important)**: 
-       - The HTML uses 'Material Symbols' (ligatures). You will see text like "dashboard", "settings" inside spans in the HTML.
-       - **DO NOT** render this as text.
-       - **DO NOT** render giant colored blocks.
-       - **ACTION**: Create a transparent FRAME sized **24x24px** named "Icon".
-       - If the screenshot shows a colored active state (e.g. blue button), apply the color to the PARENT frame, not the icon itself.
-
-    2. **SIDEBAR STRUCTURE**:
-       - The Root Frame MUST be "layoutMode": "HORIZONTAL".
-       - Left Child: "Sidebar" (Fixed width ~250px).
-       - Right Child: "Main Content" (Fill Container / layoutGrow: 1).
+    CRITICAL RULES:
+    1. **Structure**: 
+       - Look at the screenshot. If there is a Sidebar + Main Content, use a Horizontal Root Frame.
+       - Sidebar is Fixed Width. Main Content is Fill Container (layoutGrow: 1).
     
-    3. **Backgrounds**:
-       - The sidebar usually has a distinct background (white or very light gray) separated by a border. Capture this border as a "stroke".
+    2. **ICONS (Crucial)**: 
+       - The design uses "Material Symbols". The HTML might look like text ("dashboard", "home").
+       - **DO NOT** render the text "dashboard".
+       - **ACTION**: Create a Frame named "Icon" (24x24px Fixed).
+       - Leave it empty or put a vector inside if possible. Do NOT make it a giant text block.
+
+    3. **Spacing**:
+       - Trust the screenshot for whitespace. Use "itemSpacing" and "padding" to match it.
 
     JSON STRUCTURE:
     {
@@ -119,13 +137,11 @@ export default async function handler(req: any, res: any) {
       "height": number | null,
       "fills": [{ "type": "SOLID", "color": "#HEX", "opacity": number }],
       "strokes": [{ "type": "SOLID", "color": "#HEX" }],
-      "strokeWeight": number,
       "cornerRadius": number,
       "itemSpacing": number,
       "padding": { "top": number, "right": number, "bottom": number, "left": number },
       "text": "string",
       "fontSize": number,
-      "fontWeight": "Regular" | "Medium" | "Bold",
       "textAlign": "LEFT" | "CENTER" | "RIGHT",
       "children": []
     }
