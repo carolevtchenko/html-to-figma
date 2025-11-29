@@ -1,10 +1,12 @@
-// code.js – Com feedback de status em tempo real
+// code.js – Versão Corrigida (Compatível com o motor JS do Figma)
 
 figma.showUI(__html__, { width: 400, height: 550 });
 
 // Função auxiliar para mandar status para a UI
-function sendStatus(text, state = "loading") {
-  figma.ui.postMessage({ type: "update-status", text, state });
+function sendStatus(text, state) {
+  // state pode ser: "loading", "error", "success"
+  if (!state) state = "loading";
+  figma.ui.postMessage({ type: "update-status", text: text, state: state });
 }
 
 // Carrega fontes
@@ -40,18 +42,25 @@ function createNodeFromSpec(spec) {
     node.name = spec.name || "Text";
     node.characters = spec.text || " ";
     if (spec.fontSize) node.fontSize = spec.fontSize;
-    if (spec.fontWeight === "Bold") try { node.fontName = { family: "Inter", style: "Bold" }; } catch(e){}
-    else if (spec.fontWeight === "Medium") try { node.fontName = { family: "Inter", style: "Medium" }; } catch(e){}
+    
+    if (spec.fontWeight === "Bold") {
+        try { node.fontName = { family: "Inter", style: "Bold" }; } catch(e){}
+    } else if (spec.fontWeight === "Medium") {
+        try { node.fontName = { family: "Inter", style: "Medium" }; } catch(e){}
+    }
     
     if (spec.textAlign === "CENTER") node.textAlignHorizontal = "CENTER";
     if (spec.textAlign === "RIGHT") node.textAlignHorizontal = "RIGHT";
 
     if (spec.fills && spec.fills.length) {
-      node.fills = spec.fills.map(f => ({
-        type: "SOLID",
-        color: hexToFigmaColor(f.color),
-        opacity: f.opacity ?? 1
-      }));
+      node.fills = spec.fills.map(function(f) {
+        return {
+          type: "SOLID",
+          color: hexToFigmaColor(f.color),
+          // CORREÇÃO: Trocamos '??' por verificação manual
+          opacity: (f.opacity !== undefined) ? f.opacity : 1
+        };
+      });
     }
   } 
   else if (spec.type === "FRAME" || spec.type === "RECTANGLE") {
@@ -61,10 +70,12 @@ function createNodeFromSpec(spec) {
     if (spec.layoutMode && spec.layoutMode !== "NONE") {
       node.layoutMode = spec.layoutMode;
       node.itemSpacing = spec.itemSpacing || 0;
-      node.primaryAxisSizingMode = spec.primaryAxisSizingMode === "FIXED" ? "FIXED" : "AUTO";
-      node.counterAxisSizingMode = spec.counterAxisSizingMode === "FIXED" ? "FIXED" : "AUTO";
+      node.primaryAxisSizingMode = (spec.primaryAxisSizingMode === "FIXED") ? "FIXED" : "AUTO";
+      node.counterAxisSizingMode = (spec.counterAxisSizingMode === "FIXED") ? "FIXED" : "AUTO";
+      
       if (spec.primaryAxisAlignItems) node.primaryAxisAlignItems = spec.primaryAxisAlignItems;
       if (spec.counterAxisAlignItems) node.counterAxisAlignItems = spec.counterAxisAlignItems;
+      
       if (spec.padding) {
         node.paddingTop = spec.padding.top || 0;
         node.paddingRight = spec.padding.right || 0;
@@ -74,18 +85,23 @@ function createNodeFromSpec(spec) {
     }
 
     if (spec.fills && spec.fills.length) {
-      node.fills = spec.fills.map(f => ({
-        type: "SOLID",
-        color: hexToFigmaColor(f.color),
-        opacity: f.opacity ?? 1
-      }));
+      node.fills = spec.fills.map(function(f) {
+        return {
+          type: "SOLID",
+          color: hexToFigmaColor(f.color),
+          // CORREÇÃO: Trocamos '??' por verificação manual
+          opacity: (f.opacity !== undefined) ? f.opacity : 1
+        };
+      });
     }
 
     if (spec.strokes && spec.strokes.length) {
-      node.strokes = spec.strokes.map(s => ({
-        type: "SOLID",
-        color: hexToFigmaColor(s.color)
-      }));
+      node.strokes = spec.strokes.map(function(s) {
+        return {
+          type: "SOLID",
+          color: hexToFigmaColor(s.color)
+        };
+      });
       if (spec.strokeWeight) node.strokeWeight = spec.strokeWeight;
     }
 
@@ -122,7 +138,9 @@ function createNodeFromSpec(spec) {
 figma.ui.onmessage = async (msg) => {
   if (msg.type !== "convert-via-api") return;
 
-  const { html, url } = msg;
+  const html = msg.html;
+  const url = msg.url;
+  
   let viewportWidth = 1440;
   if (figma.currentPage.selection.length > 0) {
      const s = figma.currentPage.selection[0];
@@ -138,7 +156,7 @@ figma.ui.onmessage = async (msg) => {
     const res = await fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html, url, viewportWidth }),
+      body: JSON.stringify({ html: html, url: url, viewportWidth: viewportWidth }),
     });
 
     if (!res.ok) {
