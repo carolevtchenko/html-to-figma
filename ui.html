@@ -1,194 +1,28 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <title>HTML → Figma (API)</title>
-    <style>
-      body {
-        font-family: "Inter", system-ui, sans-serif;
-        margin: 16px;
-        color: #333;
+<head>
+<style>
+  body { font-family: sans-serif; padding: 16px; }
+  textarea { width: 100%; height: 250px; padding: 8px; margin-bottom: 12px; font-size: 11px; font-family: monospace; }
+  button { background: #18A0FB; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+  p { font-size: 11px; color: #666; }
+</style>
+</head>
+<body>
+  <h3>Importar JSON (Sem IA)</h3>
+  <p>Cole o JSON gerado pelo script do Chrome:</p>
+  <textarea id="jsonInput" placeholder='{"type": "FRAME"...}'></textarea>
+  <button id="draw">Desenhar Layout</button>
+  <script>
+    document.getElementById('draw').onclick = () => {
+      const jsonStr = document.getElementById('jsonInput').value;
+      try {
+        const data = JSON.parse(jsonStr);
+        parent.postMessage({ pluginMessage: { type: 'draw-layout', data } }, '*');
+      } catch(e) {
+        alert("JSON Inválido! Certifique-se de copiar tudo.");
       }
-      label {
-        font-size: 11px;
-        font-weight: 600;
-        display: block;
-        margin-bottom: 6px;
-        color: #555;
-      }
-      input[type="text"] {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 8px;
-        margin-bottom: 12px;
-        border-radius: 6px;
-        border: 1px solid #e0e0e0;
-        font-size: 12px;
-        outline: none;
-      }
-      input:focus, textarea:focus { border-color: #18a0fb; }
-      textarea {
-        width: 100%;
-        height: 200px;
-        box-sizing: border-box;
-        margin-bottom: 12px;
-        border-radius: 6px;
-        border: 1px solid #e0e0e0;
-        font-size: 11px;
-        font-family: "SF Mono", monospace;
-        padding: 8px;
-        resize: none;
-      }
-      .row { display: flex; gap: 8px; margin-bottom: 8px; }
-      
-      button {
-        padding: 10px 16px;
-        border-radius: 6px;
-        border: none;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 600;
-        transition: all 0.2s;
-      }
-      button:disabled { opacity: 0.5; cursor: not-allowed; }
-      
-      #fetch-url { background: #f0f0f0; color: #333; }
-      #fetch-url:hover { background: #e5e5e5; }
-      
-      #convert {
-        background: #18a0fb;
-        color: white;
-        width: 100%;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 8px;
-      }
-      #convert:hover { background: #0d8ce0; }
-
-      /* Status Area */
-      #status-container {
-        margin-top: 16px;
-        padding: 12px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        border: 1px solid #eee;
-        font-size: 11px;
-        display: none; /* Escondido por padrão */
-        align-items: center;
-        gap: 8px;
-      }
-      #status-container.visible { display: flex; }
-      #status-container.error { background: #fff0f0; border-color: #ffcccc; color: #d00; }
-      #status-container.success { background: #f0fff4; border-color: #ccffdd; color: #008800; }
-
-      /* Spinner Animation */
-      .spinner {
-        width: 14px;
-        height: 14px;
-        border: 2px solid rgba(0, 0, 0, 0.1);
-        border-left-color: #18a0fb;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        display: none;
-      }
-      .spinner.active { display: block; }
-
-      @keyframes spin { 100% { transform: rotate(360deg); } }
-    </style>
-  </head>
-  <body>
-    <h3>Importar HTML (IA 3.0)</h3>
-    
-    <label>URL do Site (opcional, para capturar estilos)</label>
-    <div class="row">
-      <input id="url-input" type="text" placeholder="https://exemplo.com" />
-      <button id="fetch-url">Carregar HTML</button>
-    </div>
-
-    <label>HTML (Cole ou carregue acima)</label>
-    <textarea id="html-input" placeholder="<div class='hero'>...</div>"></textarea>
-
-    <button id="convert">
-      <div class="spinner" id="btn-spinner"></div>
-      <span id="btn-text">Gerar Layout no Figma</span>
-    </button>
-
-    <div id="status-container">
-      <div class="spinner" id="status-spinner"></div>
-      <span id="status-msg"></span>
-    </div>
-
-    <script>
-      const urlInput = document.getElementById("url-input");
-      const htmlInput = document.getElementById("html-input");
-      const convertBtn = document.getElementById("convert");
-      const btnText = document.getElementById("btn-text");
-      const btnSpinner = document.getElementById("btn-spinner");
-      const statusContainer = document.getElementById("status-container");
-      const statusMsg = document.getElementById("status-msg");
-      const statusSpinner = document.getElementById("status-spinner");
-
-      function updateStatus(msg, type = "normal") {
-        statusContainer.className = "visible"; // Reseta classes e mostra
-        statusMsg.textContent = msg;
-        
-        if (type === "loading") {
-          statusSpinner.classList.add("active");
-          btnSpinner.classList.add("active");
-          convertBtn.disabled = true;
-          btnText.textContent = "Processando...";
-        } else {
-          statusSpinner.classList.remove("active");
-          btnSpinner.classList.remove("active");
-          convertBtn.disabled = false;
-          btnText.textContent = "Gerar Layout no Figma";
-          
-          if (type === "error") statusContainer.classList.add("error");
-          if (type === "success") statusContainer.classList.add("success");
-        }
-      }
-
-      // Escuta mensagens vindas do code.js (Backend do Plugin)
-      window.onmessage = (event) => {
-        const msg = event.data.pluginMessage;
-        if (!msg) return;
-
-        if (msg.type === "update-status") {
-          updateStatus(msg.text, msg.state); // state: loading, error, success
-        }
-      };
-
-      document.getElementById("fetch-url").onclick = async () => {
-        const url = (urlInput.value || "").trim();
-        if (!url) return updateStatus("Digite uma URL válida.", "error");
-
-        try {
-          updateStatus("Baixando HTML...", "loading");
-          const res = await fetch(url);
-          if (!res.ok) throw new Error("Erro " + res.status);
-          const html = await res.text();
-          htmlInput.value = html;
-          updateStatus("HTML carregado! Agora clique em Gerar Layout.", "success");
-        } catch (err) {
-          updateStatus("Erro ao acessar URL. Tente colar o HTML manualmente.", "error");
-        }
-      };
-
-      convertBtn.onclick = () => {
-        const html = (htmlInput.value || "").trim();
-        const url = (urlInput.value || "").trim();
-
-        if (!html && !url) {
-          updateStatus("Preciso de HTML ou uma URL para começar.", "error");
-          return;
-        }
-
-        // Inicia o processo visualmente
-        updateStatus("Enviando para a IA (isso leva ~30s)...", "loading");
-
-        parent.postMessage({ pluginMessage: { type: "convert-via-api", html, url } }, "*");
-      };
-    </script>
-  </body>
+    }
+  </script>
+</body>
 </html>
