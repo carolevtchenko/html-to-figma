@@ -1,4 +1,4 @@
-// api/convert-html.ts (Versão Jato: Sem Playwright, Só Texto)
+// api/convert-html.ts (Versão Otimizada para HTML Congelado)
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const CORS_HEADERS: Record<string, string> = {
@@ -25,8 +25,7 @@ export default async function handler(req: any, res: any) {
   }
 
   const { html, viewportWidth } = req.body || {};
-  const targetWidth = viewportWidth || 1440;
-
+  
   if (!html) {
     res.status(400).json({ error: "HTML is required." });
     return;
@@ -35,32 +34,25 @@ export default async function handler(req: any, res: any) {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // Vamos usar o Gemini 2.0 Flash (Experimental) se disponível, ou o 1.5 Flash.
-    // Eles são MUITO mais rápidos que o 3.0 Pro e funcionam bem com muito texto.
-    // Se der erro de modelo não encontrado, troque para "gemini-1.5-flash"
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+    // 1. Usamos o gemini-1.5-flash que é rápido e aceita contextos gigantes
+    // Adicionamos responseMimeType para garantir que a saída seja JSON válido
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.0-flash-exp",
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    });
 
     const systemPrompt = `
     You are an expert Figma Developer.
     
-    INPUT: Raw HTML with INLINE STYLES (Frozen CSS).
-    GOAL: Create a Figma Auto Layout JSON based strictly on the inline styles provided.
+    INPUT: HTML with INLINE STYLES (Frozen CSS).
+    GOAL: Create a Figma Auto Layout JSON based strictly on the inline styles.
 
-    INSTRUCTIONS:
-    1. **Analyze Styles**: Read the 'style="..."' attributes. 
-       - If 'display: flex' and 'flex-direction: row' -> "layoutMode": "HORIZONTAL".
-       - If 'display: flex' and 'flex-direction: column' -> "layoutMode": "VERTICAL".
-       - If 'background-color' is present -> add to "fills".
-       - If 'color' is present -> use it for Text fills.
-       - If 'width' is fixed (e.g., '250px') -> use it. If 'flex-grow' or 'width: 100%' -> use "layoutGrow": 1.
-
-    2. **Handling Icons**: 
-       - Since you cannot see images, look for elements with 'data-is-icon="true"' OR small fixed dimensions (e.g. width:24px; height:24px).
-       - Create a FRAME 24x24px for them. Do NOT create text nodes for icon names like "dashboard".
-
-    3. **Structure**:
-       - Recreate the DOM tree hierarchy exactly as frames/text nodes.
-       - Ignore <script>, <head>, <meta>. Focus on <body> content.
+    CRITICAL RULES TO PREVENT ERRORS:
+    1. **Simplify Deep Nesting**: If a <div> is just a wrapper with no visible style (no background, no border), SKIP IT. Process its children directly. This saves output space.
+    2. **Handling Icons**: Look for 'data-is-icon="true"' or small fixed sizes (24px). Make them 24x24 frames.
+    3. **Output JSON ONLY**: Do not write any markdown code blocks.
 
     JSON STRUCTURE:
     {
@@ -82,21 +74,35 @@ export default async function handler(req: any, res: any) {
       "textAlign": "LEFT" | "CENTER" | "RIGHT",
       "children": []
     }
-    Output ONLY valid JSON.
     `;
 
-    // Envia apenas o texto (Prompt + HTML Gigante)
-    // O Gemini Flash tem uma janela de contexto enorme (1M tokens), ele aguenta o HTML tranquilo.
     const result = await model.generateContent([systemPrompt, html]);
     const response = result.response;
     let text = response.text().trim();
-    text = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+    
+    // Tratamento de erro caso o JSON venha truncado (cortado no final)
+    // Tenta encontrar o último fechamento válido se parecer quebrado
+    try {
+        JSON.parse(text); // Teste rápido
+    } catch (e) {
+        console.log("JSON parece quebrado ou cortado. Tentando reparar...");
+        // Se falhar, é porque cortou. Vamos tentar fechar na marra os objetos e arrays abertos.
+        // (Solução simples: achar o último '}' válido)
+        const lastBrace = text.lastIndexOf('}');
+        if (lastBrace > 0) {
+            text = text.substring(0, lastBrace + 1);
+        }
+    }
 
     const spec = JSON.parse(text);
     res.status(200).json(spec);
 
   } catch (err: any) {
-    console.error("Erro:", err);
-    res.status(500).json({ error: "Falha na conversão", details: err.message });
+    console.error("Erro Fatal:", err);
+    // Retorna o erro exato para vermos no log se acontecer de novo
+    res.status(500).json({ 
+        error: "Falha na conversão (Provavelmente JSON muito grande)", 
+        details: err.message 
+    });
   }
 }
