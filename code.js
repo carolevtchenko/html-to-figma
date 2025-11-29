@@ -1,8 +1,13 @@
-// code.js – Versão JS pura (Corrigida: Sem spread operator que causava erro)
+// code.js – Com feedback de status em tempo real
 
-figma.showUI(__html__, { width: 480, height: 420 });
+figma.showUI(__html__, { width: 400, height: 550 });
 
-// Carrega fontes comuns para evitar erros
+// Função auxiliar para mandar status para a UI
+function sendStatus(text, state = "loading") {
+  figma.ui.postMessage({ type: "update-status", text, state });
+}
+
+// Carrega fontes
 async function ensureFonts() {
   const fonts = [
     { family: "Inter", style: "Regular" },
@@ -10,21 +15,14 @@ async function ensureFonts() {
     { family: "Inter", style: "Bold" },
   ];
   for (const font of fonts) {
-    try {
-      await figma.loadFontAsync(font);
-    } catch (e) {
-      console.log("Erro ao carregar fonte:", font, e);
-    }
+    try { await figma.loadFontAsync(font); } catch (e) {}
   }
 }
 
-// Converte Hex (#RRGGBB) para formato Figma {r, g, b}
 function hexToFigmaColor(hex) {
   if (!hex) return { r: 1, g: 1, b: 1 };
   let c = hex.replace("#", "").trim();
-  if (c.length === 3) {
-    c = c[0] + c[0] + c[1] + c[1] + c[2] + c[2];
-  }
+  if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
   const num = parseInt(c, 16);
   return {
     r: ((num >> 16) & 255) / 255,
@@ -33,58 +31,40 @@ function hexToFigmaColor(hex) {
   };
 }
 
-// Cria nós recursivamente com suporte a propriedades avançadas
 function createNodeFromSpec(spec) {
   if (!spec || !spec.type) return null;
-
   let node;
 
-  // --- TIPO: TEXTO ---
   if (spec.type === "TEXT") {
     node = figma.createText();
     node.name = spec.name || "Text";
     node.characters = spec.text || " ";
-    
     if (spec.fontSize) node.fontSize = spec.fontSize;
+    if (spec.fontWeight === "Bold") try { node.fontName = { family: "Inter", style: "Bold" }; } catch(e){}
+    else if (spec.fontWeight === "Medium") try { node.fontName = { family: "Inter", style: "Medium" }; } catch(e){}
     
-    // Peso da fonte
-    if (spec.fontWeight === "Bold") {
-      try { node.fontName = { family: "Inter", style: "Bold" }; } catch(e){}
-    } else if (spec.fontWeight === "Medium") {
-      try { node.fontName = { family: "Inter", style: "Medium" }; } catch(e){}
-    }
-
-    // Alinhamento
     if (spec.textAlign === "CENTER") node.textAlignHorizontal = "CENTER";
     if (spec.textAlign === "RIGHT") node.textAlignHorizontal = "RIGHT";
-    
-    // Cor do texto
-    if (spec.fills && spec.fills.length > 0) {
+
+    if (spec.fills && spec.fills.length) {
       node.fills = spec.fills.map(f => ({
         type: "SOLID",
-        color: hexToFigmaColor(f.color || "#000000"),
-        opacity: f.opacity != null ? f.opacity : 1
+        color: hexToFigmaColor(f.color),
+        opacity: f.opacity ?? 1
       }));
     }
   } 
-  
-  // --- TIPO: FRAME ou RECTANGLE ---
   else if (spec.type === "FRAME" || spec.type === "RECTANGLE") {
-    node = figma.createFrame(); 
+    node = figma.createFrame();
     node.name = spec.name || "Container";
-
-    // Layout Mode (Auto Layout)
+    
     if (spec.layoutMode && spec.layoutMode !== "NONE") {
       node.layoutMode = spec.layoutMode;
       node.itemSpacing = spec.itemSpacing || 0;
       node.primaryAxisSizingMode = spec.primaryAxisSizingMode === "FIXED" ? "FIXED" : "AUTO";
       node.counterAxisSizingMode = spec.counterAxisSizingMode === "FIXED" ? "FIXED" : "AUTO";
-      
-      // Alinhamento
       if (spec.primaryAxisAlignItems) node.primaryAxisAlignItems = spec.primaryAxisAlignItems;
       if (spec.counterAxisAlignItems) node.counterAxisAlignItems = spec.counterAxisAlignItems;
-
-      // Padding
       if (spec.padding) {
         node.paddingTop = spec.padding.top || 0;
         node.paddingRight = spec.padding.right || 0;
@@ -93,86 +73,66 @@ function createNodeFromSpec(spec) {
       }
     }
 
-    // --- ESTILIZAÇÃO VISUAL ---
-
-    // 1. Fills (Fundo)
-    if (spec.fills && spec.fills.length > 0) {
+    if (spec.fills && spec.fills.length) {
       node.fills = spec.fills.map(f => ({
         type: "SOLID",
-        color: hexToFigmaColor(f.color || "#FFFFFF"),
-        opacity: f.opacity != null ? f.opacity : 1
+        color: hexToFigmaColor(f.color),
+        opacity: f.opacity ?? 1
       }));
     }
 
-    // 2. Strokes (Bordas)
-    if (spec.strokes && spec.strokes.length > 0) {
+    if (spec.strokes && spec.strokes.length) {
       node.strokes = spec.strokes.map(s => ({
         type: "SOLID",
-        color: hexToFigmaColor(s.color || "#000000")
+        color: hexToFigmaColor(s.color)
       }));
       if (spec.strokeWeight) node.strokeWeight = spec.strokeWeight;
     }
 
-    // 3. Corner Radius (Arredondamento)
     if (spec.cornerRadius) node.cornerRadius = spec.cornerRadius;
 
-    // 4. Effects (Sombras) - CORRIGIDO AQUI
-    if (spec.effects && spec.effects.length > 0) {
-      const validEffects = [];
-      
-      for (let i = 0; i < spec.effects.length; i++) {
-        const e = spec.effects[i];
-        if (e.type === "DROP_SHADOW") {
-          const baseColor = hexToFigmaColor(e.color || "#000000");
-          validEffects.push({
-            type: "DROP_SHADOW",
-            // Correção: atribuição manual sem usar '...'
-            color: { r: baseColor.r, g: baseColor.g, b: baseColor.b, a: 0.25 },
-            offset: e.offset || { x: 0, y: 4 },
-            radius: e.radius || 4,
-            spread: e.spread || 0,
-            visible: true,
-            blendMode: "NORMAL"
-          });
+    if (spec.effects && spec.effects.length) {
+        const validEffects = [];
+        for (const e of spec.effects) {
+            if (e.type === "DROP_SHADOW") {
+                const c = hexToFigmaColor(e.color || "#000000");
+                validEffects.push({
+                    type: "DROP_SHADOW",
+                    color: { r: c.r, g: c.g, b: c.b, a: 0.25 },
+                    offset: e.offset || { x: 0, y: 4 },
+                    radius: e.radius || 4,
+                    visible: true,
+                    blendMode: "NORMAL"
+                });
+            }
         }
-      }
-      
-      if (validEffects.length > 0) {
-        node.effects = validEffects;
-      }
+        if (validEffects.length) node.effects = validEffects;
     }
 
-    // Recursão: Adicionar filhos
     if (spec.children && Array.isArray(spec.children)) {
       for (const childSpec of spec.children) {
         const childNode = createNodeFromSpec(childSpec);
-        if (childNode) {
-          node.appendChild(childNode);
-        }
+        if (childNode) node.appendChild(childNode);
       }
     }
   }
-
   return node;
 }
 
-// Função Principal
 figma.ui.onmessage = async (msg) => {
   if (msg.type !== "convert-via-api") return;
 
-  const html = msg.html || "";
-  const url = msg.url || "";
-  
+  const { html, url } = msg;
   let viewportWidth = 1440;
   if (figma.currentPage.selection.length > 0) {
-    const sel = figma.currentPage.selection[0];
-    if (sel.width) viewportWidth = Math.floor(sel.width);
+     const s = figma.currentPage.selection[0];
+     if(s.width) viewportWidth = Math.floor(s.width);
   }
 
   try {
-    figma.notify("Enviando para a IA (pode levar alguns segundos)... ⏳");
+    // 1. Feedback inicial
+    sendStatus("Conectando à IA... (Aguarde ~30s)", "loading");
 
-    // Certifique-se que esta URL é a do seu backend atual
     const apiUrl = "https://html-to-figma-chi.vercel.app/api/convert-html"; 
     
     const res = await fetch(apiUrl, {
@@ -182,32 +142,33 @@ figma.ui.onmessage = async (msg) => {
     });
 
     if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Erro na API: " + res.status);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || "Erro HTTP " + res.status);
     }
 
-    const spec = await res.json();
-    console.log("Spec recebido:", spec);
+    // 2. Feedback de processamento
+    sendStatus("IA respondeu! Construindo elementos no Figma...", "loading");
 
+    const spec = await res.json();
     await ensureFonts();
-    
     const rootNode = createNodeFromSpec(spec);
-    
+
     if (rootNode) {
-        if(rootNode.type === "FRAME") {
-            rootNode.resizeWithoutConstraints(viewportWidth, rootNode.height);
-        }
-        
-        figma.currentPage.appendChild(rootNode);
-        figma.currentPage.selection = [rootNode];
-        figma.viewport.scrollAndZoomIntoView([rootNode]);
-        figma.notify("Layout gerado com sucesso! 🎉");
+      if(rootNode.type === "FRAME") rootNode.resizeWithoutConstraints(viewportWidth, rootNode.height);
+      figma.currentPage.appendChild(rootNode);
+      figma.currentPage.selection = [rootNode];
+      figma.viewport.scrollAndZoomIntoView([rootNode]);
+      
+      // 3. Sucesso final
+      sendStatus("Pronto! Layout gerado com sucesso.", "success");
+      figma.notify("Layout gerado! 🎉");
     } else {
-        figma.notify("A IA não retornou um layout válido.");
+      throw new Error("JSON inválido retornado pela IA.");
     }
 
   } catch (err) {
-    console.error("Erro no plugin:", err);
-    figma.notify("Erro: " + err.message);
+    console.error(err);
+    sendStatus("Erro: " + err.message, "error");
+    figma.notify("Falha na conversão ❌");
   }
 };

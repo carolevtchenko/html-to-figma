@@ -1,174 +1,194 @@
-// code.js – Com feedback de status em tempo real
-
-figma.showUI(__html__, { width: 400, height: 550 });
-
-// Função auxiliar para mandar status para a UI
-function sendStatus(text, state = "loading") {
-  figma.ui.postMessage({ type: "update-status", text, state });
-}
-
-// Carrega fontes
-async function ensureFonts() {
-  const fonts = [
-    { family: "Inter", style: "Regular" },
-    { family: "Inter", style: "Medium" },
-    { family: "Inter", style: "Bold" },
-  ];
-  for (const font of fonts) {
-    try { await figma.loadFontAsync(font); } catch (e) {}
-  }
-}
-
-function hexToFigmaColor(hex) {
-  if (!hex) return { r: 1, g: 1, b: 1 };
-  let c = hex.replace("#", "").trim();
-  if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
-  const num = parseInt(c, 16);
-  return {
-    r: ((num >> 16) & 255) / 255,
-    g: ((num >> 8) & 255) / 255,
-    b: (num & 255) / 255,
-  };
-}
-
-function createNodeFromSpec(spec) {
-  if (!spec || !spec.type) return null;
-  let node;
-
-  if (spec.type === "TEXT") {
-    node = figma.createText();
-    node.name = spec.name || "Text";
-    node.characters = spec.text || " ";
-    if (spec.fontSize) node.fontSize = spec.fontSize;
-    if (spec.fontWeight === "Bold") try { node.fontName = { family: "Inter", style: "Bold" }; } catch(e){}
-    else if (spec.fontWeight === "Medium") try { node.fontName = { family: "Inter", style: "Medium" }; } catch(e){}
-    
-    if (spec.textAlign === "CENTER") node.textAlignHorizontal = "CENTER";
-    if (spec.textAlign === "RIGHT") node.textAlignHorizontal = "RIGHT";
-
-    if (spec.fills && spec.fills.length) {
-      node.fills = spec.fills.map(f => ({
-        type: "SOLID",
-        color: hexToFigmaColor(f.color),
-        opacity: f.opacity ?? 1
-      }));
-    }
-  } 
-  else if (spec.type === "FRAME" || spec.type === "RECTANGLE") {
-    node = figma.createFrame();
-    node.name = spec.name || "Container";
-    
-    if (spec.layoutMode && spec.layoutMode !== "NONE") {
-      node.layoutMode = spec.layoutMode;
-      node.itemSpacing = spec.itemSpacing || 0;
-      node.primaryAxisSizingMode = spec.primaryAxisSizingMode === "FIXED" ? "FIXED" : "AUTO";
-      node.counterAxisSizingMode = spec.counterAxisSizingMode === "FIXED" ? "FIXED" : "AUTO";
-      if (spec.primaryAxisAlignItems) node.primaryAxisAlignItems = spec.primaryAxisAlignItems;
-      if (spec.counterAxisAlignItems) node.counterAxisAlignItems = spec.counterAxisAlignItems;
-      if (spec.padding) {
-        node.paddingTop = spec.padding.top || 0;
-        node.paddingRight = spec.padding.right || 0;
-        node.paddingBottom = spec.padding.bottom || 0;
-        node.paddingLeft = spec.padding.left || 0;
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>HTML → Figma (API)</title>
+    <style>
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+        margin: 16px;
+        color: #333;
       }
-    }
-
-    if (spec.fills && spec.fills.length) {
-      node.fills = spec.fills.map(f => ({
-        type: "SOLID",
-        color: hexToFigmaColor(f.color),
-        opacity: f.opacity ?? 1
-      }));
-    }
-
-    if (spec.strokes && spec.strokes.length) {
-      node.strokes = spec.strokes.map(s => ({
-        type: "SOLID",
-        color: hexToFigmaColor(s.color)
-      }));
-      if (spec.strokeWeight) node.strokeWeight = spec.strokeWeight;
-    }
-
-    if (spec.cornerRadius) node.cornerRadius = spec.cornerRadius;
-
-    if (spec.effects && spec.effects.length) {
-        const validEffects = [];
-        for (const e of spec.effects) {
-            if (e.type === "DROP_SHADOW") {
-                const c = hexToFigmaColor(e.color || "#000000");
-                validEffects.push({
-                    type: "DROP_SHADOW",
-                    color: { r: c.r, g: c.g, b: c.b, a: 0.25 },
-                    offset: e.offset || { x: 0, y: 4 },
-                    radius: e.radius || 4,
-                    visible: true,
-                    blendMode: "NORMAL"
-                });
-            }
-        }
-        if (validEffects.length) node.effects = validEffects;
-    }
-
-    if (spec.children && Array.isArray(spec.children)) {
-      for (const childSpec of spec.children) {
-        const childNode = createNodeFromSpec(childSpec);
-        if (childNode) node.appendChild(childNode);
+      label {
+        font-size: 11px;
+        font-weight: 600;
+        display: block;
+        margin-bottom: 6px;
+        color: #555;
       }
-    }
-  }
-  return node;
-}
-
-figma.ui.onmessage = async (msg) => {
-  if (msg.type !== "convert-via-api") return;
-
-  const { html, url } = msg;
-  let viewportWidth = 1440;
-  if (figma.currentPage.selection.length > 0) {
-     const s = figma.currentPage.selection[0];
-     if(s.width) viewportWidth = Math.floor(s.width);
-  }
-
-  try {
-    // 1. Feedback inicial
-    sendStatus("Conectando à IA... (Aguarde ~30s)", "loading");
-
-    const apiUrl = "https://html-to-figma-chi.vercel.app/api/convert-html"; 
-    
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html, url, viewportWidth }),
-    });
-
-    if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || "Erro HTTP " + res.status);
-    }
-
-    // 2. Feedback de processamento
-    sendStatus("IA respondeu! Construindo elementos no Figma...", "loading");
-
-    const spec = await res.json();
-    await ensureFonts();
-    const rootNode = createNodeFromSpec(spec);
-
-    if (rootNode) {
-      if(rootNode.type === "FRAME") rootNode.resizeWithoutConstraints(viewportWidth, rootNode.height);
-      figma.currentPage.appendChild(rootNode);
-      figma.currentPage.selection = [rootNode];
-      figma.viewport.scrollAndZoomIntoView([rootNode]);
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+        margin-bottom: 12px;
+        border-radius: 6px;
+        border: 1px solid #e0e0e0;
+        font-size: 12px;
+        outline: none;
+      }
+      input:focus, textarea:focus { border-color: #18a0fb; }
+      textarea {
+        width: 100%;
+        height: 200px;
+        box-sizing: border-box;
+        margin-bottom: 12px;
+        border-radius: 6px;
+        border: 1px solid #e0e0e0;
+        font-size: 11px;
+        font-family: "SF Mono", monospace;
+        padding: 8px;
+        resize: none;
+      }
+      .row { display: flex; gap: 8px; margin-bottom: 8px; }
       
-      // 3. Sucesso final
-      sendStatus("Pronto! Layout gerado com sucesso.", "success");
-      figma.notify("Layout gerado! 🎉");
-    } else {
-      throw new Error("JSON inválido retornado pela IA.");
-    }
+      button {
+        padding: 10px 16px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        transition: all 0.2s;
+      }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      
+      #fetch-url { background: #f0f0f0; color: #333; }
+      #fetch-url:hover { background: #e5e5e5; }
+      
+      #convert {
+        background: #18a0fb;
+        color: white;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+      }
+      #convert:hover { background: #0d8ce0; }
 
-  } catch (err) {
-    console.error(err);
-    sendStatus("Erro: " + err.message, "error");
-    figma.notify("Falha na conversão ❌");
-  }
-};
+      /* Status Area */
+      #status-container {
+        margin-top: 16px;
+        padding: 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        border: 1px solid #eee;
+        font-size: 11px;
+        display: none; /* Escondido por padrão */
+        align-items: center;
+        gap: 8px;
+      }
+      #status-container.visible { display: flex; }
+      #status-container.error { background: #fff0f0; border-color: #ffcccc; color: #d00; }
+      #status-container.success { background: #f0fff4; border-color: #ccffdd; color: #008800; }
+
+      /* Spinner Animation */
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(0, 0, 0, 0.1);
+        border-left-color: #18a0fb;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        display: none;
+      }
+      .spinner.active { display: block; }
+
+      @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <h3>Importar HTML (IA 3.0)</h3>
+    
+    <label>URL do Site (opcional, para capturar estilos)</label>
+    <div class="row">
+      <input id="url-input" type="text" placeholder="https://exemplo.com" />
+      <button id="fetch-url">Carregar HTML</button>
+    </div>
+
+    <label>HTML (Cole ou carregue acima)</label>
+    <textarea id="html-input" placeholder="<div class='hero'>...</div>"></textarea>
+
+    <button id="convert">
+      <div class="spinner" id="btn-spinner"></div>
+      <span id="btn-text">Gerar Layout no Figma</span>
+    </button>
+
+    <div id="status-container">
+      <div class="spinner" id="status-spinner"></div>
+      <span id="status-msg"></span>
+    </div>
+
+    <script>
+      const urlInput = document.getElementById("url-input");
+      const htmlInput = document.getElementById("html-input");
+      const convertBtn = document.getElementById("convert");
+      const btnText = document.getElementById("btn-text");
+      const btnSpinner = document.getElementById("btn-spinner");
+      const statusContainer = document.getElementById("status-container");
+      const statusMsg = document.getElementById("status-msg");
+      const statusSpinner = document.getElementById("status-spinner");
+
+      function updateStatus(msg, type = "normal") {
+        statusContainer.className = "visible"; // Reseta classes e mostra
+        statusMsg.textContent = msg;
+        
+        if (type === "loading") {
+          statusSpinner.classList.add("active");
+          btnSpinner.classList.add("active");
+          convertBtn.disabled = true;
+          btnText.textContent = "Processando...";
+        } else {
+          statusSpinner.classList.remove("active");
+          btnSpinner.classList.remove("active");
+          convertBtn.disabled = false;
+          btnText.textContent = "Gerar Layout no Figma";
+          
+          if (type === "error") statusContainer.classList.add("error");
+          if (type === "success") statusContainer.classList.add("success");
+        }
+      }
+
+      // Escuta mensagens vindas do code.js (Backend do Plugin)
+      window.onmessage = (event) => {
+        const msg = event.data.pluginMessage;
+        if (!msg) return;
+
+        if (msg.type === "update-status") {
+          updateStatus(msg.text, msg.state); // state: loading, error, success
+        }
+      };
+
+      document.getElementById("fetch-url").onclick = async () => {
+        const url = (urlInput.value || "").trim();
+        if (!url) return updateStatus("Digite uma URL válida.", "error");
+
+        try {
+          updateStatus("Baixando HTML...", "loading");
+          const res = await fetch(url);
+          if (!res.ok) throw new Error("Erro " + res.status);
+          const html = await res.text();
+          htmlInput.value = html;
+          updateStatus("HTML carregado! Agora clique em Gerar Layout.", "success");
+        } catch (err) {
+          updateStatus("Erro ao acessar URL. Tente colar o HTML manualmente.", "error");
+        }
+      };
+
+      convertBtn.onclick = () => {
+        const html = (htmlInput.value || "").trim();
+        const url = (urlInput.value || "").trim();
+
+        if (!html && !url) {
+          updateStatus("Preciso de HTML ou uma URL para começar.", "error");
+          return;
+        }
+
+        // Inicia o processo visualmente
+        updateStatus("Enviando para a IA (isso leva ~30s)...", "loading");
+
+        parent.postMessage({ pluginMessage: { type: "convert-via-api", html, url } }, "*");
+      };
+    </script>
+  </body>
+</html>
