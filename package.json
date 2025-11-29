@@ -1,14 +1,13 @@
 {
-  "name": "html-to-figma-backend",
+  "name": "html-to-figma",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "echo \"no build step\"",
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "build": "vercel build"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
-    "playwright": "^1.57.0"
+    "@google/generative-ai": "^0.21.0"
   },
   "engines": {
     "node": ">=18"
