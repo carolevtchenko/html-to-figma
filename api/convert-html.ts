@@ -1,10 +1,5 @@
-// api/convert-html.ts (Versão Blindada: Força Ícones e Layout)
+// api/convert-html.ts (Versão Jato: Sem Playwright, Só Texto)
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import chromium from "@sparticuz/chromium";
-import { chromium as playwrightCore } from "playwright-core";
-
-chromium.setHeadlessMode = true;
-chromium.setGraphicsMode = false;
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -13,6 +8,7 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 export default async function handler(req: any, res: any) {
+  // Configura CORS
   for (const [key, value] of Object.entries(CORS_HEADERS)) {
     res.setHeader(key, value);
   }
@@ -28,108 +24,49 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const { html, url, viewportWidth } = req.body || {};
+  const { html, viewportWidth } = req.body || {};
   const targetWidth = viewportWidth || 1440;
 
-  let browser = null;
+  if (!html) {
+    res.status(400).json({ error: "HTML is required." });
+    return;
+  }
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    // Usamos o Gemini 3.0 Pro, que é o melhor visualmente
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
-
-    const executablePath = await chromium.executablePath();
-    browser = await playwrightCore.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: executablePath,
-      headless: chromium.headless,
-    });
-
-    const page = await browser.newPage();
-    await page.setViewportSize({ width: targetWidth, height: 1200 });
-
-    if (url) {
-      await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
-    } else if (html) {
-      // --- A CORREÇÃO MÁGICA ---
-      // Mesmo se o HTML vier "congelado", nós injetamos os links de fontes vitais no topo.
-      // Isso conserta os ícones quebrados.
-      const criticalHead = `
-        <head>
-          <script src="https://cdn.tailwindcss.com"></script>
-          <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-          <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
-          <style>
-            /* Força renderização correta de ícones para a IA não se perder */
-            .material-symbols-outlined, [class*="material-symbols"] {
-              font-family: 'Material Symbols Outlined' !important;
-              font-weight: normal;
-              font-style: normal;
-              font-size: 24px;
-              line-height: 1;
-              letter-spacing: normal;
-              text-transform: none;
-              display: inline-block;
-              white-space: nowrap;
-              word-wrap: normal;
-              direction: ltr;
-            }
-          </style>
-        </head>
-      `;
-      
-      // Se o HTML já tem <head>, inserimos antes de fechar. Se não tem, adicionamos no começo.
-      let enhancedHtml = html;
-      if (html.includes("</head>")) {
-        enhancedHtml = html.replace("</head>", criticalHead + "</head>");
-      } else {
-        enhancedHtml = `<!DOCTYPE html><html>${criticalHead}<body>${html}</body></html>`;
-      }
-
-      await page.setContent(enhancedHtml, { waitUntil: "networkidle", timeout: 60000 });
-    } else {
-      throw new Error("Preciso de URL ou HTML.");
-    }
-
-    // Espera explícita para fontes carregarem (vital para ícones)
-    try { await page.evaluate(() => document.fonts.ready); } catch(e){}
-
-    const screenshotBuffer = await page.screenshot({ fullPage: false });
-    const base64Image = screenshotBuffer.toString("base64");
     
-    const imagePart = {
-      inlineData: {
-        data: base64Image,
-        mimeType: "image/png",
-      },
-    };
+    // Vamos usar o Gemini 2.0 Flash (Experimental) se disponível, ou o 1.5 Flash.
+    // Eles são MUITO mais rápidos que o 3.0 Pro e funcionam bem com muito texto.
+    // Se der erro de modelo não encontrado, troque para "gemini-1.5-flash"
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
     const systemPrompt = `
-    You are a Senior UI Engineer.
+    You are an expert Figma Developer.
     
-    INPUT: A screenshot of a Dashboard UI and its raw HTML.
-    GOAL: Recreate the layout in Figma JSON pixel-perfectly.
+    INPUT: Raw HTML with INLINE STYLES (Frozen CSS).
+    GOAL: Create a Figma Auto Layout JSON based strictly on the inline styles provided.
 
-    CRITICAL RULES:
-    1. **Structure**: 
-       - Look at the screenshot. If there is a Sidebar + Main Content, use a Horizontal Root Frame.
-       - Sidebar is Fixed Width. Main Content is Fill Container (layoutGrow: 1).
-    
-    2. **ICONS (Crucial)**: 
-       - The design uses "Material Symbols". The HTML might look like text ("dashboard", "home").
-       - **DO NOT** render the text "dashboard".
-       - **ACTION**: Create a Frame named "Icon" (24x24px Fixed).
-       - Leave it empty or put a vector inside if possible. Do NOT make it a giant text block.
+    INSTRUCTIONS:
+    1. **Analyze Styles**: Read the 'style="..."' attributes. 
+       - If 'display: flex' and 'flex-direction: row' -> "layoutMode": "HORIZONTAL".
+       - If 'display: flex' and 'flex-direction: column' -> "layoutMode": "VERTICAL".
+       - If 'background-color' is present -> add to "fills".
+       - If 'color' is present -> use it for Text fills.
+       - If 'width' is fixed (e.g., '250px') -> use it. If 'flex-grow' or 'width: 100%' -> use "layoutGrow": 1.
 
-    3. **Spacing**:
-       - Trust the screenshot for whitespace. Use "itemSpacing" and "padding" to match it.
+    2. **Handling Icons**: 
+       - Since you cannot see images, look for elements with 'data-is-icon="true"' OR small fixed dimensions (e.g. width:24px; height:24px).
+       - Create a FRAME 24x24px for them. Do NOT create text nodes for icon names like "dashboard".
+
+    3. **Structure**:
+       - Recreate the DOM tree hierarchy exactly as frames/text nodes.
+       - Ignore <script>, <head>, <meta>. Focus on <body> content.
 
     JSON STRUCTURE:
     {
       "type": "FRAME" | "TEXT",
       "name": "string",
-      "layoutMode": "VERTICAL" | "HORIZONTAL",
+      "layoutMode": "VERTICAL" | "HORIZONTAL" | "NONE",
       "layoutGrow": 0 | 1,
       "primaryAxisSizingMode": "FIXED" | "AUTO",
       "counterAxisSizingMode": "FIXED" | "AUTO",
@@ -148,7 +85,9 @@ export default async function handler(req: any, res: any) {
     Output ONLY valid JSON.
     `;
 
-    const result = await model.generateContent([imagePart, systemPrompt]);
+    // Envia apenas o texto (Prompt + HTML Gigante)
+    // O Gemini Flash tem uma janela de contexto enorme (1M tokens), ele aguenta o HTML tranquilo.
+    const result = await model.generateContent([systemPrompt, html]);
     const response = result.response;
     let text = response.text().trim();
     text = text.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -158,8 +97,6 @@ export default async function handler(req: any, res: any) {
 
   } catch (err: any) {
     console.error("Erro:", err);
-    res.status(500).json({ error: "Falha", details: err.message });
-  } finally {
-    if (browser) await browser.close();
+    res.status(500).json({ error: "Falha na conversão", details: err.message });
   }
 }
