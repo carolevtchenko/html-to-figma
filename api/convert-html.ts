@@ -1,5 +1,10 @@
-// api/convert-html.ts (Versão Otimizada para HTML Congelado)
+// api/convert-html.ts (Versão Minificada Definitiva)
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import chromium from "@sparticuz/chromium";
+import { chromium as playwrightCore } from "playwright-core";
+
+chromium.setHeadlessMode = true;
+chromium.setGraphicsMode = false;
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -8,101 +13,103 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 export default async function handler(req: any, res: any) {
-  // Configura CORS
-  for (const [key, value] of Object.entries(CORS_HEADERS)) {
-    res.setHeader(key, value);
-  }
-
-  if (req.method === "OPTIONS") {
-    res.status(200).end();
-    return;
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    res.status(500).json({ error: "GEMINI_API_KEY is not set." });
-    return;
-  }
+  for (const [key, value] of Object.entries(CORS_HEADERS)) res.setHeader(key, value);
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   const { html, viewportWidth } = req.body || {};
-  
-  if (!html) {
-    res.status(400).json({ error: "HTML is required." });
-    return;
-  }
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "No API Key" });
+  if (!html) return res.status(400).json({ error: "No HTML" });
 
+  let browser = null;
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // 1. Usamos o gemini-1.5-flash que é rápido e aceita contextos gigantes
-    // Adicionamos responseMimeType para garantir que a saída seja JSON válido
+    // Gemini 1.5 Flash é o mais estável para JSONs grandes
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash-exp",
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
+        model: "gemini-1.5-flash",
+        generationConfig: { responseMimeType: "application/json" }
     });
 
-    const systemPrompt = `
-    You are an expert Figma Developer.
-    
-    INPUT: HTML with INLINE STYLES (Frozen CSS).
-    GOAL: Create a Figma Auto Layout JSON based strictly on the inline styles.
+    const executablePath = await chromium.executablePath();
+    browser = await playwrightCore.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: executablePath,
+      headless: chromium.headless,
+    });
 
-    CRITICAL RULES TO PREVENT ERRORS:
-    1. **Simplify Deep Nesting**: If a <div> is just a wrapper with no visible style (no background, no border), SKIP IT. Process its children directly. This saves output space.
-    2. **Handling Icons**: Look for 'data-is-icon="true"' or small fixed sizes (24px). Make them 24x24 frames.
-    3. **Output JSON ONLY**: Do not write any markdown code blocks.
+    const page = await browser.newPage();
+    await page.setViewportSize({ width: viewportWidth || 1440, height: 1200 });
 
-    JSON STRUCTURE:
-    {
-      "type": "FRAME" | "TEXT",
-      "name": "string",
-      "layoutMode": "VERTICAL" | "HORIZONTAL" | "NONE",
-      "layoutGrow": 0 | 1,
-      "primaryAxisSizingMode": "FIXED" | "AUTO",
-      "counterAxisSizingMode": "FIXED" | "AUTO",
-      "width": number | null, 
-      "height": number | null,
-      "fills": [{ "type": "SOLID", "color": "#HEX", "opacity": number }],
-      "strokes": [{ "type": "SOLID", "color": "#HEX" }],
-      "cornerRadius": number,
-      "itemSpacing": number,
-      "padding": { "top": number, "right": number, "bottom": number, "left": number },
-      "text": "string",
-      "fontSize": number,
-      "textAlign": "LEFT" | "CENTER" | "RIGHT",
-      "children": []
+    // 1. Injeção de Dependências (Garante que o design fique igual ao original)
+    let finalHtml = html;
+    if (!html.includes("cdn.tailwindcss.com")) {
+        const headInjection = `
+          <script src="https://cdn.tailwindcss.com"></script>
+          <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+          <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+          <style>
+            body { font-family: 'Roboto', sans-serif; }
+            .material-symbols-outlined { font-family: 'Material Symbols Outlined' !important; font-size: 24px; }
+          </style>
+        `;
+        finalHtml = html.includes("<head>") 
+            ? html.replace("<head>", `<head>${headInjection}`) 
+            : `<!DOCTYPE html><html><head>${headInjection}</head><body>${html}</body></html>`;
     }
+
+    await page.setContent(finalHtml, { waitUntil: "networkidle", timeout: 60000 });
+    
+    // Espera fontes para ícones não quebrarem
+    try { await page.evaluate(() => document.fonts.ready); } catch(e){}
+
+    const screenshotBuffer = await page.screenshot({ fullPage: false });
+    const base64Image = screenshotBuffer.toString("base64");
+
+    // 2. Prompt com Protocolo de Minificação (Reduz tokens em 60%)
+    const prompt = `
+    Role: Figma Layout Engine.
+    Input: Screenshot + HTML.
+    Task: Recreate exact layout using Auto Layout.
+    
+    OUTPUT FORMAT (MINIFIED JSON):
+    Use these exact short keys to save space:
+    - "t": type ("f"=FRAME, "t"=TEXT, "r"=RECTANGLE)
+    - "n": name
+    - "lm": layoutMode ("h"=HORIZONTAL, "v"=VERTICAL, "n"=NONE)
+    - "lg": layoutGrow (1 or 0)
+    - "w": width, "h": height
+    - "f": fills array [{ "c": "#HEX", "o": opacity }]
+    - "s": strokes array [{ "c": "#HEX" }]
+    - "r": cornerRadius
+    - "p": padding [top, right, bottom, left]
+    - "g": itemSpacing (gap)
+    - "txt": characters (for text)
+    - "fs": fontSize
+    - "al": textAlign ("l", "c", "r")
+    - "ch": children array
+
+    RULES:
+    1. **Sidebar**: If sidebar detected, Root Frame must be "lm":"h". Sidebar fixed width, Content "lg":1.
+    2. **Icons**: If you see an icon (Material Symbol), output: { "t": "f", "n": "Icon", "w": 24, "h": 24, "ch": [] }. DO NOT put text inside.
+    3. **Fidelity**: Match colors and spacing from screenshot.
+
+    Return ONLY the JSON.
     `;
 
-    const result = await model.generateContent([systemPrompt, html]);
-    const response = result.response;
-    let text = response.text().trim();
+    const result = await model.generateContent([
+        { inlineData: { data: base64Image, mimeType: "image/png" } }, 
+        prompt
+    ]);
     
-    // Tratamento de erro caso o JSON venha truncado (cortado no final)
-    // Tenta encontrar o último fechamento válido se parecer quebrado
-    try {
-        JSON.parse(text); // Teste rápido
-    } catch (e) {
-        console.log("JSON parece quebrado ou cortado. Tentando reparar...");
-        // Se falhar, é porque cortou. Vamos tentar fechar na marra os objetos e arrays abertos.
-        // (Solução simples: achar o último '}' válido)
-        const lastBrace = text.lastIndexOf('}');
-        if (lastBrace > 0) {
-            text = text.substring(0, lastBrace + 1);
-        }
-    }
-
-    const spec = JSON.parse(text);
+    const responseText = result.response.text();
+    const spec = JSON.parse(responseText);
     res.status(200).json(spec);
 
   } catch (err: any) {
-    console.error("Erro Fatal:", err);
-    // Retorna o erro exato para vermos no log se acontecer de novo
-    res.status(500).json({ 
-        error: "Falha na conversão (Provavelmente JSON muito grande)", 
-        details: err.message 
-    });
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (browser) await browser.close();
   }
 }
