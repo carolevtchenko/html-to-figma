@@ -1,4 +1,4 @@
-// code.js – Versão JS pura com suporte a Alta Fidelidade (Bordas, Sombras, Radius)
+// code.js – Versão JS pura (Corrigida: Sem spread operator que causava erro)
 
 figma.showUI(__html__, { width: 480, height: 420 });
 
@@ -13,7 +13,7 @@ async function ensureFonts() {
     try {
       await figma.loadFontAsync(font);
     } catch (e) {
-      console.log(`Erro ao carregar fonte ${font.style}:`, e);
+      console.log("Erro ao carregar fonte:", font, e);
     }
   }
 }
@@ -47,7 +47,7 @@ function createNodeFromSpec(spec) {
     
     if (spec.fontSize) node.fontSize = spec.fontSize;
     
-    // Peso da fonte (tentativa básica)
+    // Peso da fonte
     if (spec.fontWeight === "Bold") {
       try { node.fontName = { family: "Inter", style: "Bold" }; } catch(e){}
     } else if (spec.fontWeight === "Medium") {
@@ -70,7 +70,7 @@ function createNodeFromSpec(spec) {
   
   // --- TIPO: FRAME ou RECTANGLE ---
   else if (spec.type === "FRAME" || spec.type === "RECTANGLE") {
-    node = figma.createFrame(); // Usamos Frame para quase tudo para suportar auto layout
+    node = figma.createFrame(); 
     node.name = spec.name || "Container";
 
     // Layout Mode (Auto Layout)
@@ -91,9 +91,6 @@ function createNodeFromSpec(spec) {
         node.paddingBottom = spec.padding.bottom || 0;
         node.paddingLeft = spec.padding.left || 0;
       }
-    } else {
-        // Se não for auto-layout, tenta remover
-        // node.layoutMode = "NONE"; (API padrão já cria sem layout, mas frames geralmente precisam de tamanho fixo se não tiverem layout)
     }
 
     // --- ESTILIZAÇÃO VISUAL ---
@@ -119,22 +116,30 @@ function createNodeFromSpec(spec) {
     // 3. Corner Radius (Arredondamento)
     if (spec.cornerRadius) node.cornerRadius = spec.cornerRadius;
 
-    // 4. Effects (Sombras)
+    // 4. Effects (Sombras) - CORRIGIDO AQUI
     if (spec.effects && spec.effects.length > 0) {
-      node.effects = spec.effects.map(e => {
+      const validEffects = [];
+      
+      for (let i = 0; i < spec.effects.length; i++) {
+        const e = spec.effects[i];
         if (e.type === "DROP_SHADOW") {
-          return {
+          const baseColor = hexToFigmaColor(e.color || "#000000");
+          validEffects.push({
             type: "DROP_SHADOW",
-            color: { ...hexToFigmaColor(e.color || "#000000"), a: 0.25 }, // Alpha fixo por segurança ou extrair se vier no hex
+            // Correção: atribuição manual sem usar '...'
+            color: { r: baseColor.r, g: baseColor.g, b: baseColor.b, a: 0.25 },
             offset: e.offset || { x: 0, y: 4 },
             radius: e.radius || 4,
             spread: e.spread || 0,
             visible: true,
             blendMode: "NORMAL"
-          };
+          });
         }
-        return null;
-      }).filter(Boolean);
+      }
+      
+      if (validEffects.length > 0) {
+        node.effects = validEffects;
+      }
     }
 
     // Recursão: Adicionar filhos
@@ -158,7 +163,6 @@ figma.ui.onmessage = async (msg) => {
   const html = msg.html || "";
   const url = msg.url || "";
   
-  // Captura largura do viewport (baseado na seleção ou padrão)
   let viewportWidth = 1440;
   if (figma.currentPage.selection.length > 0) {
     const sel = figma.currentPage.selection[0];
@@ -168,7 +172,7 @@ figma.ui.onmessage = async (msg) => {
   try {
     figma.notify("Enviando para a IA (pode levar alguns segundos)... ⏳");
 
-    // URL da sua API (verifique se é esta mesmo no Vercel/Local)
+    // Certifique-se que esta URL é a do seu backend atual
     const apiUrl = "https://html-to-figma-chi.vercel.app/api/convert-html"; 
     
     const res = await fetch(apiUrl, {
@@ -178,8 +182,8 @@ figma.ui.onmessage = async (msg) => {
     });
 
     if (!res.ok) {
-      const errJson = await res.json();
-      throw new Error(errJson.error || "Erro na API");
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || "Erro na API: " + res.status);
     }
 
     const spec = await res.json();
@@ -190,7 +194,6 @@ figma.ui.onmessage = async (msg) => {
     const rootNode = createNodeFromSpec(spec);
     
     if (rootNode) {
-        // Ajusta tamanho final se for frame
         if(rootNode.type === "FRAME") {
             rootNode.resizeWithoutConstraints(viewportWidth, rootNode.height);
         }
@@ -204,7 +207,7 @@ figma.ui.onmessage = async (msg) => {
     }
 
   } catch (err) {
-    console.error(err);
+    console.error("Erro no plugin:", err);
     figma.notify("Erro: " + err.message);
   }
 };
